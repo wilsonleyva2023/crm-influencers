@@ -202,13 +202,16 @@ const HERRAMIENTAS = [
   {nombre:"Heepsy", url:"https://www.heepsy.co", desc:"Búsqueda por nicho, país y rango de seguidores, con estimación de audiencia."}
 ];
 
-const PLANTILLAS = [
-  {titulo:"Pedido de capturas", texto:"Hola! Para avanzar con la propuesta necesito que me mandes las capturas de tus estadísticas: género, edad y país de tu audiencia (en Instagram: Perfil profesional > Estadísticas de la audiencia)."},
-  {titulo:"Perfil aprobado", texto:"Buenas noticias! Tu perfil fue aprobado. El presupuesto para esta campaña es de $[MONTO]. El video debe insertar el logo de la marca por 6-7 segundos, sin guion verbal, sin política ni religión. ¿Te sirve ese monto?"},
-  {titulo:"Contraoferta", texto:"Entiendo tu propuesta. Del lado de la marca el máximo que puedo mover es $[MONTO]. ¿Cerramos en ese número?"},
-  {titulo:"Perfil rechazado (guardar contacto)", texto:"Che, esta vez la marca no aprobó tu perfil por [MOTIVO]. Igual te dejo guardado por si surge otra campaña que te calce mejor."},
-  {titulo:"Pedido de reenvío del video", texto:"Antes de que se cumplan los 15 días y Instagram borre el video publicitario, ¿me podés pasar el MP4 original? Lo necesito para mi archivo de casos."},
-  {titulo:"Recordatorio de pago enviado", texto:"Te acabo de enviar el pago de $[MONTO] por [MEDIO]. Cualquier cosa avisame."}
+const PLANTILLAS_DEFAULT = [
+  {id:'p1', titulo:"Paso 1: El Gancho (primer contacto)", texto:"¡Hola! ¿Cómo estás? Soy Wilson, me pongo en contacto con vos para ofrecerte una colaboración publicitaria súper sencilla.\nTrabajo con las casas de apuestas mejor posicionadas y que mejor pagan (1xBet, Stake, Betsson, etc.). Vi tu perfil y creo que encaja perfecto. Si te interesa escuchar de qué se trata y generar un ingreso sin tener que cambiar el estilo de tu contenido, avisame y te cuento rapidito. ¡Abrazo!"},
+  {id:'p2', titulo:"Paso 2: La Dinámica y el Filtro de Seguridad", texto:"¡Excelente! Te cuento cómo es la dinámica: es súper simple. Solo tenés que colocar un pequeño logo de la marca en cualquier parte de tu video por unos 6 o 7 segundos. No tenés que hablar, ni promocionarla oralmente, solo dejar el logo a la vista.\nAntes de avanzar, te hago una pregunta clave para ver con qué marca te asignamos: ¿Trabajaste con 1xBet en los últimos 3 meses? (Si ya colaboraste con ellos hace menos de 3 meses, no podríamos hacerlo ahora mismo, pero te guardo para otra de las plataformas. Y si tenés otra cuenta secundaria, ¡también sirve!)"},
+  {id:'p3', titulo:"Paso 3: El Cierre (pedir métricas para cotizar)", texto:"¡Perfecto entonces, estamos listos! Para poder pasarte la cotización exacta y decirte cuánto te vamos a pagar, necesito que me mandes una captura de pantalla de tus estadísticas de Instagram.\nPor favor, pasame las capturas de: Edad, Países y Género (es un requisito de la marca que el público sea al menos 60% hombres). Apenas me mandes esas fotos, lo envío directo para que me aprueben tu presupuesto y te paso el número. ¡Quedo a la espera!"},
+  {id:'p4', titulo:"Pedido de capturas", texto:"Hola! Para avanzar con la propuesta necesito que me mandes las capturas de tus estadísticas: género, edad y país de tu audiencia (en Instagram: Perfil profesional > Estadísticas de la audiencia)."},
+  {id:'p5', titulo:"Perfil aprobado", texto:"Buenas noticias! Tu perfil fue aprobado. El presupuesto para esta campaña es de $[MONTO]. El video debe insertar el logo de la marca por 6-7 segundos, sin guion verbal, sin política ni religión. ¿Te sirve ese monto?"},
+  {id:'p6', titulo:"Contraoferta", texto:"Entiendo tu propuesta. Del lado de la marca el máximo que puedo mover es $[MONTO]. ¿Cerramos en ese número?"},
+  {id:'p7', titulo:"Perfil rechazado (guardar contacto)", texto:"Che, esta vez la marca no aprobó tu perfil por [MOTIVO]. Igual te dejo guardado por si surge otra campaña que te calce mejor."},
+  {id:'p8', titulo:"Pedido de reenvío del video", texto:"Antes de que se cumplan los 15 días y Instagram borre el video publicitario, ¿me podés pasar el MP4 original? Lo necesito para mi archivo de casos."},
+  {id:'p9', titulo:"Recordatorio de pago enviado", texto:"Te acabo de enviar el pago de $[MONTO] por [MEDIO]. Cualquier cosa avisame."}
 ];
 
 let state = { influencers: [], view: "dashboard", detailId: null };
@@ -334,6 +337,7 @@ async function loadData(){
   }
   state.influencers = state.influencers.map(migrate);
   state.chatHistorial = await loadChatHistory();
+  state.plantillas = await loadPlantillas();
   render();
 }
 
@@ -593,6 +597,42 @@ async function loadChatHistory(){
     return raw ? JSON.parse(raw) : [];
   }catch(e){
     return [];
+  }
+}
+
+async function loadPlantillas(){
+  const supa = getSupabaseClient();
+  if(supa){
+    try{
+      const { data, error } = await supa.from('crm_influencers').select('data').eq('id','plantillas').maybeSingle();
+      if(error) throw error;
+      if(data && data.data){
+        localStorage.setItem('tmfix_plantillas_cache', JSON.stringify(data.data));
+        return data.data;
+      }
+      await supa.from('crm_influencers').upsert({id:'plantillas', data: PLANTILLAS_DEFAULT, updated_at: new Date().toISOString()});
+      localStorage.setItem('tmfix_plantillas_cache', JSON.stringify(PLANTILLAS_DEFAULT));
+      return PLANTILLAS_DEFAULT;
+    }catch(e){
+      console.error('Error cargando plantillas', e);
+      const raw = localStorage.getItem('tmfix_plantillas_cache');
+      return raw ? JSON.parse(raw) : PLANTILLAS_DEFAULT;
+    }
+  }
+  const raw = localStorage.getItem('tmfix_plantillas_cache');
+  return raw ? JSON.parse(raw) : PLANTILLAS_DEFAULT;
+}
+
+async function savePlantillas(){
+  try{ localStorage.setItem('tmfix_plantillas_cache', JSON.stringify(state.plantillas)); }catch(e){}
+  const supa = getSupabaseClient();
+  if(!supa) return;
+  try{
+    const { error } = await supa.from('crm_influencers').upsert({id:'plantillas', data: state.plantillas, updated_at: new Date().toISOString()});
+    if(error) throw error;
+  }catch(e){
+    console.error('Error guardando plantillas', e);
+    alert('No se pudo sincronizar la plantilla con la nube — quedó guardada solo en este dispositivo.');
   }
 }
 
@@ -857,15 +897,56 @@ function renderPortfolio(){
 }
 
 function renderMensajes(){
+  const plantillas = state.plantillas||[];
   return `
-    <p class="muted" style="margin-bottom:16px">Plantillas para copiar y pegar en WhatsApp. Reemplazá [MONTO], [MEDIO] o [MOTIVO] antes de enviar.</p>
-    ${PLANTILLAS.map((p,i)=>`
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <p class="muted" style="margin:0">Plantillas para copiar y pegar. Reemplazá [MONTO], [MEDIO] o [MOTIVO] antes de enviar.</p>
+      <button class="primary" id="btn-nueva-plantilla">+ Nueva plantilla</button>
+    </div>
+    ${plantillas.map((p)=>`
       <div class="msg-card">
-        <div class="msg-top"><strong>${p.titulo}</strong><button class="ghost" data-copy-msg="${i}">Copiar</button></div>
+        <div class="msg-top">
+          <strong>${p.titulo}</strong>
+          <span>
+            <button class="ghost" data-copy-msg="${p.id}">Copiar</button>
+            <button class="ghost" data-edit-msg="${p.id}">Editar</button>
+            <button class="ghost" style="color:var(--coral); border-color:var(--coral-dim)" data-delete-msg="${p.id}">Eliminar</button>
+          </span>
+        </div>
         <p>${p.texto}</p>
       </div>
     `).join('')}
   `;
+}
+
+function openPlantillaModal(existing){
+  const p = existing || {id:uid(), titulo:'', texto:''};
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>${existing?'Editar plantilla':'Nueva plantilla'} <span class="close" id="modal-close">×</span></h2>
+      <div class="field"><label>Título</label><input id="pl-titulo" value="${p.titulo}"></div>
+      <div class="field"><label>Texto</label><textarea id="pl-texto" rows="6">${p.texto}</textarea></div>
+      <p class="ia-note">Podés usar [MONTO], [MEDIO], [MOTIVO] como marcadores para completar antes de enviar.</p>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="modal-save">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-save').onclick = async ()=>{
+    p.titulo = document.getElementById('pl-titulo').value.trim();
+    p.texto = document.getElementById('pl-texto').value.trim();
+    if(!p.titulo || !p.texto){ alert('Completá título y texto'); return; }
+    if(!existing) state.plantillas.push(p);
+    await savePlantillas();
+    overlay.remove();
+    render();
+  };
 }
 
 function renderAsistente(){
@@ -1844,13 +1925,29 @@ function attachEvents(){
   if(state.view==='mensajes'){
     document.querySelectorAll('[data-copy-msg]').forEach(btn=>{
       btn.onclick = ()=>{
-        const texto = PLANTILLAS[btn.dataset.copyMsg].texto;
-        navigator.clipboard.writeText(texto).then(()=>{
+        const p = state.plantillas.find(pl=>pl.id===btn.dataset.copyMsg);
+        if(!p) return;
+        navigator.clipboard.writeText(p.texto).then(()=>{
           btn.textContent = 'Copiado ✓';
           setTimeout(()=>btn.textContent='Copiar', 1500);
         }).catch(()=>alert('No se pudo copiar. Copialo manualmente.'));
       };
     });
+    document.querySelectorAll('[data-edit-msg]').forEach(btn=>{
+      btn.onclick = ()=>{
+        const p = state.plantillas.find(pl=>pl.id===btn.dataset.editMsg);
+        if(p) openPlantillaModal(p);
+      };
+    });
+    document.querySelectorAll('[data-delete-msg]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        if(!confirm('¿Eliminar esta plantilla?')) return;
+        state.plantillas = state.plantillas.filter(pl=>pl.id!==btn.dataset.deleteMsg);
+        await savePlantillas();
+        render();
+      };
+    });
+    document.getElementById('btn-nueva-plantilla').onclick = ()=>openPlantillaModal();
   }
 
   if(state.view==='asistente'){
