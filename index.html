@@ -202,6 +202,13 @@ const HERRAMIENTAS = [
   {nombre:"Heepsy", url:"https://www.heepsy.co", desc:"Búsqueda por nicho, país y rango de seguidores, con estimación de audiencia."}
 ];
 
+const NICHOS_BUSQUEDA = [
+  {nombre:"Fútbol (el más seguro, ~90% hombres)", palabras:["out of context fútbol","resumen goles","memes termo","fútbol picante","la 12","gallinas","ascenso","futbol peruano memes"]},
+  {nombre:"Shitpost / Memes", palabras:["shitpost arg","memes random","humor negro","videos graciosos"]},
+  {nombre:"Autos y motos (~100% hombres jóvenes)", palabras:["fierreros","motos al piso","tuning"]},
+  {nombre:"Gaming / Streamers", palabras:["clips de streamers","resumen de streams"]}
+];
+
 const PLANTILLAS_DEFAULT = [
   {id:'p1', titulo:"Paso 1: El Gancho (primer contacto)", texto:"¡Hola! ¿Cómo estás? Soy Wilson, me pongo en contacto con vos para ofrecerte una colaboración publicitaria súper sencilla.\nTrabajo con las casas de apuestas mejor posicionadas y que mejor pagan (1xBet, Stake, Betsson, etc.). Vi tu perfil y creo que encaja perfecto. Si te interesa escuchar de qué se trata y generar un ingreso sin tener que cambiar el estilo de tu contenido, avisame y te cuento rapidito. ¡Abrazo!"},
   {id:'p2', titulo:"Paso 2: La Dinámica y el Filtro de Seguridad", texto:"¡Excelente! Te cuento cómo es la dinámica: es súper simple. Solo tenés que colocar un pequeño logo de la marca en cualquier parte de tu video por unos 6 o 7 segundos. No tenés que hablar, ni promocionarla oralmente, solo dejar el logo a la vista.\nAntes de avanzar, te hago una pregunta clave para ver con qué marca te asignamos: ¿Trabajaste con 1xBet en los últimos 3 meses? (Si ya colaboraste con ellos hace menos de 3 meses, no podríamos hacerlo ahora mismo, pero te guardo para otra de las plataformas. Y si tenés otra cuenta secundaria, ¡también sirve!)"},
@@ -984,6 +991,42 @@ function renderHerramientas(){
         <p>${h.desc}</p>
       </div>
     `).join('')}
+
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Guía de búsqueda por nichos</h3>
+    <p class="muted" style="margin-bottom:14px">Nichos con audiencia mayormente masculina (70-90%). Buscá estas palabras en la lupa de Instagram, según el país.</p>
+    ${NICHOS_BUSQUEDA.map(n=>`
+      <div class="msg-card">
+        <div class="msg-top"><strong>${n.nombre}</strong></div>
+        <div class="chips" style="margin-top:6px">
+          ${n.palabras.map(p=>`<span class="chip" style="cursor:pointer" data-copy-palabra="${p}" title="Copiar">${p}</span>`).join('')}
+        </div>
+      </div>
+    `).join('')}
+
+    <div class="msg-card">
+      <div class="msg-top"><strong>Técnica "madriguera de conejo"</strong></div>
+      <p>Encontrá UNA cuenta buena del nicho → entrá a su perfil → tocá el ícono de "Cuentas sugeridas" (persona con +) al lado de Seguir → Instagram te tira ~20 cuentas parecidas, mismo país y nicho. Repetilo con las nuevas para encadenar. Hacelo con una cuenta de Instagram aparte para prospección, no la personal ni la del negocio — si no, le desordenás el algoritmo a la tuya.</p>
+    </div>
+
+    <div class="msg-card">
+      <div class="msg-top"><strong>Filtro visual de 10 segundos (antes de anotarla)</strong></div>
+      <p>
+        · Últimos 6 posts: ¿algo de política o religión? Si está limpio, avanza.<br>
+        · Mirá las <strong>vistas de los reels</strong>, no solo seguidores — si tiene muchos seguidores pero pocas vistas, es cuenta inactiva o con bots.<br>
+        · Mirá los comentarios: si son puros emojis repetidos, puede ser actividad falsa aunque parezca movida.<br>
+        · Revisá los "Destacados" (Highlights) del perfil — si tiene uno de "Colabs" o "Marcas", ahí confirmás si ya trabajó con otra casa de apuestas hace menos de 3 meses, antes de escribirle.<br>
+        · Si también tiene TikTok, cruzalo — ahí las vistas se ven todavía más claras.
+      </p>
+    </div>
+
+    <div class="msg-card">
+      <div class="msg-top"><strong>Otros tips</strong></div>
+      <p>
+        · Mirá quién comenta seguido — a veces son otras cuentas del mismo nicho que ni te aparecen sugeridas.<br>
+        · Sesiones de 20-30 minutos, un par de veces al día — mucho scrolleo y clics seguidos de una sentada puede disparar alguna verificación de seguridad de Instagram.<br>
+        · Anotá el usuario en el CRM apenas lo ves, aunque sea sin todos los datos — completalo después con calma.
+      </p>
+    </div>
 
     <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Análisis de cotización</h3>
     <p class="muted" style="margin-bottom:14px">Tus negociaciones aprobadas, ordenadas de menor a mayor cantidad de seguidores, para que veas a ojo cómo se mueve el presupuesto que aprueba Michael. Esto NO calcula ningún patrón solo — es una vista ordenada para que vos lo analices.</p>
@@ -1948,6 +1991,18 @@ function attachEvents(){
       };
     });
     document.getElementById('btn-nueva-plantilla').onclick = ()=>openPlantillaModal();
+  }
+
+  if(state.view==='herramientas'){
+    document.querySelectorAll('[data-copy-palabra]').forEach(chip=>{
+      chip.onclick = ()=>{
+        navigator.clipboard.writeText(chip.dataset.copyPalabra).then(()=>{
+          const original = chip.textContent;
+          chip.textContent = 'Copiado ✓';
+          setTimeout(()=>chip.textContent = original, 1200);
+        });
+      };
+    });
   }
 
   if(state.view==='asistente'){
