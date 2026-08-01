@@ -603,6 +603,13 @@ function getAlerts(){
         }
       }
     });
+    if(inf.historial_contacto && inf.historial_contacto.length && !estaOcupado(inf)){
+      const ultimoContacto = inf.historial_contacto.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))[inf.historial_contacto.length-1];
+      const yaFueAprobado = (inf.negociaciones||[]).some(n=>n.estado==='Aprobado'||n.estado==='En Campaña');
+      if(ultimoContacto.fecha && daysBetween(ultimoContacto.fecha, today) >= 14 && !yaFueAprobado){
+        alerts.push({tipo:'warn', texto:`${inf.usuario_ig} — se enfrió, hace ${daysBetween(ultimoContacto.fecha, today)} días sin novedades. Reintentar o descartar.`, infId: inf.id});
+      }
+    }
   });
   return alerts;
 }
@@ -621,6 +628,29 @@ function totalGanancia(){
 
 function totalAprobados(){
   return state.influencers.filter(inf => (inf.negociaciones||[]).some(n=>n.estado==='Aprobado'||n.estado==='En Campaña')).length;
+}
+
+function datosSemana(){
+  const hoy = todayStr();
+  const hace7 = new Date(); hace7.setDate(hace7.getDate()-7);
+  const hace7str = hace7.toISOString().slice(0,10);
+  let ganancia = 0, reelsSubidos = 0, nuevasNegociaciones = 0;
+  state.influencers.forEach(inf=>{
+    (inf.negociaciones||[]).forEach(neg=>{
+      if(neg.fecha && neg.fecha >= hace7str) nuevasNegociaciones++;
+      (neg.reels||[]).forEach(r=>{
+        if(r.fecha_publicacion && r.fecha_publicacion >= hace7str){
+          reelsSubidos++;
+          if(neg.estado==='Aprobado'||neg.estado==='En Campaña'){
+            const numReels = Number(neg.num_reels)||5;
+            ganancia += ((Number(neg.presupuesto_marca)||0)-(Number(neg.pago_final)||0)) / numReels;
+          }
+        }
+      });
+    });
+  });
+  const alertas = getAlerts();
+  return { ganancia: Math.round(ganancia), reelsSubidos, nuevasNegociaciones, alertasPendientes: alertas.length };
 }
 
 function lastNeg(inf){
@@ -662,6 +692,14 @@ function renderDashboard(){
         </div>`).join('') : '<div class="empty-alerts">Sin alertas por ahora.</div>'}
     </div>
     <button class="primary" id="btn-new-from-dash">+ Nuevo influencer</button>
+
+    <div class="detail-section" style="margin-top:24px">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+        <h3 style="margin:0; font-size:13px; text-transform:uppercase; color:var(--text2)">Resumen semanal</h3>
+        <button class="ghost" id="btn-resumen-semanal">Generar con IA</button>
+      </div>
+      <div id="resumen-semanal-box" class="ia-note"></div>
+    </div>
   `;
 }
 
@@ -994,6 +1032,11 @@ function openInfluencerModal(existing){
             <option value="">Seleccionar...</option>
             ${CATEGORIAS.map(c=>`<option ${inf.categoria===c?'selected':''}>${c}</option>`).join('')}
           </select>
+          <div style="margin-top:8px;">
+            <input type="file" id="m-cat-file" accept="image/*" style="font-size:11px">
+            <button class="ghost" id="m-cat-sugerir" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Sugerir categoría con IA</button>
+            <div id="m-cat-status" class="ia-note"></div>
+          </div>
         </div>
         <div class="field"><label>Público masculino (%)</label><input id="m-pct" type="number" min="0" max="100" value="${inf.publico_masculino_pct}"></div>
         <div class="field"><label>Seguidores</label><input id="m-seguidores" type="number" value="${inf.seguidores}" placeholder="ej: 150000"></div>
@@ -1019,6 +1062,45 @@ function openInfluencerModal(existing){
   document.body.appendChild(overlay);
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+
+  let catBase64 = null, catMediaType = null;
+  document.getElementById('m-cat-file').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    catMediaType = file.type;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      catBase64 = reader.result.split(',')[1];
+      document.getElementById('m-cat-sugerir').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('m-cat-sugerir').onclick = async ()=>{
+    if(!catBase64) return;
+    const btn = document.getElementById('m-cat-sugerir');
+    const status = document.getElementById('m-cat-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Analizando...`;
+    const prompt = `Mirá esta captura de un perfil de Instagram y decime cuál de estas categorías le queda mejor, según su contenido: ${CATEGORIAS.join(', ')}. Respondé ÚNICAMENTE con el nombre exacto de una de esas categorías, sin nada más.`;
+    try{
+      const texto = (await llamarGemini(prompt, catBase64, catMediaType)).trim();
+      const match = CATEGORIAS.find(c=>texto.toLowerCase().includes(c.toLowerCase()));
+      if(match){
+        document.getElementById('m-categoria').value = match;
+        status.innerHTML = `<span class="gain">Sugerida: ${match}</span>`;
+      }else{
+        status.innerHTML = `<span class="muted">No pude identificarla bien, elegila vos.</span>`;
+      }
+    }catch(err){
+      if(err.message==='SIN_CLAVE'){
+        status.innerHTML = 'Configurá la IA primero.';
+      }else{
+        status.innerHTML = `<span class="pct-bad">Error: ${err.message}</span>`;
+      }
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
@@ -1484,6 +1566,22 @@ function attachEvents(){
     document.querySelectorAll('[data-goto]').forEach(el=>{
       el.onclick = ()=>{ state.detailId = el.dataset.goto; state.view='detail'; render(); };
     });
+    document.getElementById('btn-resumen-semanal').onclick = async ()=>{
+      const box = document.getElementById('resumen-semanal-box');
+      box.innerHTML = `<span class="spinner"></span>Armando el resumen...`;
+      const d = datosSemana();
+      const prompt = `Escribí un resumen semanal corto (máximo 4 líneas) para un Influencer Marketing Manager, en español rioplatense, con estos datos reales de los últimos 7 días — no inventes ni cambies estos números: ganancia estimada $${d.ganancia}, ${d.reelsSubidos} reels subidos, ${d.nuevasNegociaciones} negociaciones nuevas iniciadas, ${d.alertasPendientes} alertas pendientes de resolver. Sé directo, tipo mensaje de WhatsApp a uno mismo.`;
+      try{
+        const texto = await llamarGemini(prompt);
+        box.textContent = texto.trim();
+      }catch(err){
+        if(err.message==='SIN_CLAVE'){
+          box.innerHTML = 'Configurá la IA primero.';
+        }else{
+          box.innerHTML = `<span class="pct-bad">Error: ${err.message}</span>`;
+        }
+      }
+    };
   }
 
   if(state.view==='pool'){
