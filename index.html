@@ -189,6 +189,7 @@
 
 <script>
 const CATEGORIAS = ["Fútbol","Memes","Entretenimiento","Streamers","Otro"];
+const PAISES = ["Argentina","Perú","México","Colombia","Chile","Ecuador","Otro"];
 const ESTADOS = ["Standby","Aprobado","Rechazado","En Campaña"];
 const MEDIOS_PAGO = ["Binance Pay ID","USDT TRC20","CBU/CVU","Lemon Cash","Transferencia","Otro"];
 const ESTADOS_PAGO = ["Pendiente","Enviado","Confirmado"];
@@ -254,6 +255,17 @@ function precalificacion(inf){
 
 function estaOcupado(inf){
   return (inf.negociaciones||[]).some(n=>['Standby','Aprobado','En Campaña'].includes(n.estado));
+}
+
+function sugerenciaReescribir(inf){
+  const hist = inf.historial_contacto||[];
+  if(!hist.length || estaOcupado(inf)) return '';
+  const ultimo = hist.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))[hist.length-1];
+  if(!ultimo.fecha) return '';
+  const dias = daysBetween(ultimo.fecha, todayStr());
+  if(dias < 3) return `<p class="ia-note" style="margin-top:8px">Le escribiste hace ${dias} día${dias===1?'':'s'} — dale un poco más de margen antes de insistir.</p>`;
+  if(dias >= 3 && dias <= 6) return `<p class="ia-note" style="margin-top:8px"><span class="gain">Buen momento para reescribirle</span> — pasaron ${dias} días sin respuesta.</p>`;
+  return `<p class="ia-note" style="margin-top:8px"><span class="pct-bad">Ya pasaron ${dias} días</span> sin novedades — si no responde de nuevo, capaz conviene pasarlo a "descartado" y ofrecerlo a otra marca.</p>`;
 }
 
 function esCarteraDisponible(inf){
@@ -349,7 +361,31 @@ async function saveData(){
   refreshNubeStatus();
 }
 
+function revisarDatosIncompletos(){
+  const problemas = [];
+  state.influencers.forEach(inf=>{
+    (inf.negociaciones||[]).forEach(neg=>{
+      if((neg.estado==='Aprobado'||neg.estado==='En Campaña') && !neg.presupuesto_marca){
+        problemas.push(`${inf.usuario_ig} — negociación con ${neg.marca} está ${neg.estado} pero sin presupuesto cargado`);
+      }
+      if((neg.estado==='Aprobado'||neg.estado==='En Campaña') && !neg.pago_final){
+        problemas.push(`${inf.usuario_ig} — negociación con ${neg.marca} sin pago final acordado`);
+      }
+      if(neg.estado_pago==='Confirmado' && !neg.medio_pago){
+        problemas.push(`${inf.usuario_ig} — pago marcado como confirmado pero sin medio de pago`);
+      }
+    });
+    if(!inf.contacto) problemas.push(`${inf.usuario_ig} — sin dato de contacto cargado`);
+  });
+  return problemas;
+}
+
 function downloadBackup(){
+  const problemas = revisarDatosIncompletos();
+  if(problemas.length){
+    const verMas = problemas.length>5 ? `\n...y ${problemas.length-5} más.` : '';
+    if(!confirm(`Antes de bajar el backup, encontré ${problemas.length} dato(s) incompleto(s):\n\n${problemas.slice(0,5).join('\n')}${verMas}\n\n¿Bajar el backup igual?`)) return;
+  }
   const blob = new Blob([JSON.stringify(state.influencers, null, 2)], {type:'application/json'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -802,7 +838,7 @@ function renderPortfolio(){
   }
   return `
     <div class="portfolio-grid">
-      ${casos.map(c=>`
+      ${casos.map((c,i)=>`
         <div class="portfolio-card">
           <h4>${c.inf.usuario_ig}</h4>
           <div class="muted">${c.inf.categoria||'Sin categoría'} · ${c.neg.marca}</div>
@@ -811,6 +847,9 @@ function renderPortfolio(){
           <div class="links">
             ${c.reelsConVideo.map(r=>`<a href="${r.link_video_descargado}" target="_blank">Reel ${r.numero}</a>`).join('')}
           </div>
+          <button class="ghost" style="margin-top:10px; font-size:11px; padding:5px 10px;" data-caso-exito="${i}">Redactar caso de éxito con IA</button>
+          <div id="caso-status-${i}" class="ia-note"></div>
+          <textarea id="caso-texto-${i}" rows="4" style="display:none; margin-top:8px; font-size:12px;"></textarea>
         </div>
       `).join('')}
     </div>
@@ -910,6 +949,7 @@ function renderDetail(){
       </div>
       <div>
         ${inf.link_ig ? `<a href="${inf.link_ig}" target="_blank">Ver Instagram →</a>` : ''}
+        <button class="ghost" id="btn-compartir" style="margin-left:10px">Compartir con Michael</button>
         <button class="ghost" id="btn-desc-michael" style="margin-left:10px">Descripción para Michael</button>
         <button class="ghost" id="btn-edit-profile" style="margin-left:10px">Editar perfil</button>
         <button class="ghost" id="btn-delete-inf" style="margin-left:10px; color:var(--coral); border-color:var(--coral-dim)">Eliminar</button>
@@ -932,6 +972,7 @@ function renderDetail(){
         ${(inf.historial_contacto&&inf.historial_contacto.length) ? inf.historial_contacto.slice().reverse().map(c=>`
           <div class="contact-entry"><span>${c.nota||'Sin nota'}</span><span class="fecha">${c.fecha}</span></div>
         `).join('') : '<p class="muted">Todavía no registraste contactos.</p>'}
+        ${sugerenciaReescribir(inf)}
       </div>
     </div>
 
@@ -956,6 +997,7 @@ function renderDetail(){
             <div><span class="k">País principal</span><span class="v">${s.pais_principal||'—'}</span></div>
             <div><span class="k">Rango de edad</span><span class="v">${s.rango_edad_principal||'—'}</span></div>
           </div>
+          ${s.captura_url ? `<a href="${s.captura_url}" target="_blank" style="color:var(--gold); font-size:12px; display:inline-block; margin-top:8px;">Ver captura original</a>` : '<span class="muted" style="font-size:11px; display:block; margin-top:8px;">Sin imagen guardada</span>'}
         </div>`;
       }).join('') : '<p class="muted">Todavía no subiste ninguna captura de estadísticas.</p>'}
     </div>
@@ -1018,7 +1060,7 @@ function renderDetail(){
 
 // ---------- Modales ----------
 function openInfluencerModal(existing){
-  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[]};
+  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', pais:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[]};
   const overlay = document.createElement('div');
   overlay.className='overlay';
   overlay.innerHTML = `
@@ -1028,6 +1070,12 @@ function openInfluencerModal(existing){
         <div class="field"><label>Usuario de Instagram</label><input id="m-usuario" value="${inf.usuario_ig}" placeholder="@usuario"></div>
         <div class="field"><label>Link de Instagram</label><input id="m-link" value="${inf.link_ig}" placeholder="https://instagram.com/..."></div>
         <div class="field"><label>WhatsApp / Contacto</label><input id="m-contacto" value="${inf.contacto}"></div>
+        <div class="field"><label>País</label>
+          <select id="m-pais">
+            <option value="">Seleccionar...</option>
+            ${PAISES.map(p=>`<option ${inf.pais===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
         <div class="field"><label>Categoría</label>
           <select id="m-categoria">
             <option value="">Seleccionar...</option>
@@ -1088,13 +1136,17 @@ function openInfluencerModal(existing){
     const status = document.getElementById('m-cat-status');
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Analizando...`;
-    const prompt = `Mirá esta captura de un perfil de Instagram y decime cuál de estas categorías le queda mejor, según su contenido: ${CATEGORIAS.join(', ')}. Respondé ÚNICAMENTE con el nombre exacto de una de esas categorías, sin nada más.`;
+    const prompt = `Mirá esta captura de un perfil de Instagram. Respondé ÚNICAMENTE con un JSON sin texto adicional, con este formato: {"categoria": "<una de estas exacta: ${CATEGORIAS.join(', ')}>", "apto": <true o false>, "motivo": "<si apto es false, por qué — contenido sexual, político, violento, u otro problema; si es true, dejalo vacío>"}`;
     try{
       const texto = (await llamarGemini(prompt, catBase64, catMediaType)).trim();
-      const match = CATEGORIAS.find(c=>texto.toLowerCase().includes(c.toLowerCase()));
-      if(match){
-        document.getElementById('m-categoria').value = match;
-        status.innerHTML = `<span class="gain">Sugerida: ${match}</span>`;
+      const clean = texto.replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(clean);
+      const match = CATEGORIAS.find(c=>(parsed.categoria||'').toLowerCase().includes(c.toLowerCase()));
+      if(match) document.getElementById('m-categoria').value = match;
+      if(parsed.apto===false){
+        status.innerHTML = `<span class="pct-bad">⚠ Posible problema de contenido: ${parsed.motivo||'revisar manualmente'}</span>${match?` — Categoría sugerida: ${match}`:''}`;
+      }else if(match){
+        status.innerHTML = `<span class="gain">Sugerida: ${match} — sin problemas de contenido detectados</span>`;
       }else{
         status.innerHTML = `<span class="muted">No pude identificarla bien, elegila vos.</span>`;
       }
@@ -1148,8 +1200,18 @@ function openInfluencerModal(existing){
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
+    const usuarioNorm = inf.usuario_ig.toLowerCase().replace('@','').trim();
+    const linkNorm = document.getElementById('m-link').value.trim().toLowerCase().replace(/\/$/,'');
+    const duplicado = state.influencers.find(otro=>{
+      if(otro.id===inf.id) return false;
+      const otroUsuario = (otro.usuario_ig||'').toLowerCase().replace('@','').trim();
+      const otroLink = (otro.link_ig||'').toLowerCase().replace(/\/$/,'');
+      return otroUsuario===usuarioNorm || (linkNorm && otroLink===linkNorm);
+    });
+    if(duplicado && !confirm(`Ya tenés cargado a "${duplicado.usuario_ig}" con estos mismos datos. ¿Guardar igual como un perfil nuevo?`)) return;
     inf.link_ig = document.getElementById('m-link').value.trim();
     inf.contacto = document.getElementById('m-contacto').value.trim();
+    inf.pais = document.getElementById('m-pais').value;
     inf.categoria = document.getElementById('m-categoria').value;
     inf.publico_masculino_pct = document.getElementById('m-pct').value;
     inf.seguidores = document.getElementById('m-seguidores').value;
@@ -1157,7 +1219,7 @@ function openInfluencerModal(existing){
     inf.prioridad = document.getElementById('m-prioridad').value;
     inf.cooldown_hasta = document.getElementById('m-cooldown').value;
     inf.etiquetas = document.getElementById('m-etiquetas').value.split(',').map(s=>s.trim()).filter(Boolean);
-    inf.codigo_promocional = document.getElementById('m-promo').value.trim();
+    inf.codigo_promocional = document.getElementById('m-promo').value.trim().toUpperCase().replace(/\s+/g,'');
     inf.logo_link = document.getElementById('m-logo').value.trim();
     inf.historial_contacto = inf.historial_contacto || [];
     if(!existing) state.influencers.push(inf);
@@ -1208,7 +1270,9 @@ function openNegModal(infId, existingNeg){
           </select>
         </div>
       </div>
-      <div class="field"><label>Motivo de rechazo (opcional)</label><textarea id="n-motivo" rows="2">${neg.motivo_rechazo||''}</textarea></div>
+      <div class="field"><label>Motivo de rechazo (opcional)</label><textarea id="n-motivo" rows="2">${neg.motivo_rechazo||''}</textarea>
+        <button class="ghost" id="n-motivo-mejorar" style="font-size:11px; padding:5px 10px; margin-top:6px">Redactar profesional con IA</button>
+      </div>
       <div class="modal-actions">
         <button class="ghost" id="modal-cancel">Cancelar</button>
         <button class="primary" id="modal-save">Guardar</button>
@@ -1225,6 +1289,21 @@ function openNegModal(infId, existingNeg){
       document.getElementById('usar-sugerencia').onclick = ()=>{ document.getElementById('n-oferta').value = sug.promedio; };
     }
   }
+  document.getElementById('n-motivo-mejorar').onclick = async ()=>{
+    const btn = document.getElementById('n-motivo-mejorar');
+    const actual = document.getElementById('n-motivo').value.trim();
+    if(!actual){ alert('Escribí primero una idea breve del motivo.'); return; }
+    btn.disabled = true;
+    btn.textContent = 'Escribiendo...';
+    try{
+      const texto = await llamarGemini(`Reescribí esta nota interna sobre por qué se rechazó un perfil de influencer, en un tono profesional y corto (máximo 2 líneas), en español: "${actual}". Respondé solo con el texto reescrito.`);
+      document.getElementById('n-motivo').value = texto.trim();
+    }catch(err){
+      alert(err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : 'Error: '+err.message);
+    }
+    btn.disabled = false;
+    btn.textContent = 'Redactar profesional con IA';
+  };
   document.getElementById('modal-save').onclick = async ()=>{
     neg.marca = document.getElementById('n-marca').value.trim();
     if(!neg.marca){ alert('Falta el nombre de la marca'); return; }
@@ -1267,7 +1346,13 @@ function openReelModal(infId, negId, existingReel){
       </div>
       <div class="field"><label>Link del reel (Instagram)</label><input id="r-link" value="${reel.link_reel}"></div>
       <div class="field"><label>Link del video descargado (Drive, etc.)</label><input id="r-video" value="${reel.link_video_descargado}"></div>
-      <div class="field"><label>Monto pagado por este reel ($, opcional)</label><input id="r-monto" type="number" value="${reel.monto_pagado}"></div>
+      <div class="field"><label>Monto pagado por este reel ($, opcional)</label><input id="r-monto" type="number" value="${reel.monto_pagado}">
+        <div style="margin-top:8px;">
+          <input type="file" id="r-comp-file" accept="image/*" style="font-size:11px">
+          <button class="ghost" id="r-comp-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer comprobante con IA</button>
+          <div id="r-comp-status" class="ia-note"></div>
+        </div>
+      </div>
       <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="r-comprimido" style="width:auto" ${reel.comprimido?'checked':''}> Ya lo comprimí y archivé</label></div>
       <div class="field">
         <label>Verificar logo y código promocional (captura del reel, opcional)</label>
@@ -1311,7 +1396,7 @@ function openReelModal(infId, negId, existingReel){
     const status = document.getElementById('r-verif-status');
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Revisando la captura...`;
-    const prompt = `Esta es una captura de pantalla de un reel de Instagram publicitario. Necesito confirmar dos cosas: 1) si se ve algún logo de marca/casa de apuestas en el video, y 2) si se ve un código promocional de texto en pantalla${inf.codigo_promocional ? ` (el código esperado es "${inf.codigo_promocional}")` : ''}. Respondé en español, en máximo 3 líneas, diciendo claramente si ves el logo (sí/no) y si ves el código promocional (sí/no y cuál texto ves si es distinto al esperado).`;
+    const prompt = `Esta es una captura de pantalla de un reel de Instagram publicitario. Necesito confirmar tres cosas: 1) si se ve algún logo de marca/casa de apuestas en el video, 2) si se ve un código promocional de texto en pantalla${inf.codigo_promocional ? ` (el código esperado es "${inf.codigo_promocional}")` : ''}, y 3) si hay algo que parezca contenido político o religioso (símbolos, banderas partidarias, referencias religiosas). Respondé en español, máximo 4 líneas: logo (sí/no), código promocional (sí/no y qué texto ves), y si hay contenido político/religioso (sí/no, qué viste si es que sí).`;
     try{
       const texto = await llamarGemini(prompt, verifBase64, verifMediaType);
       status.textContent = texto.trim();
@@ -1325,6 +1410,42 @@ function openReelModal(infId, negId, existingReel){
     }
     btn.disabled = false;
   };
+
+  let compBase64 = null, compMediaType = null;
+  document.getElementById('r-comp-file').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    compMediaType = file.type;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      compBase64 = reader.result.split(',')[1];
+      document.getElementById('r-comp-leer').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('r-comp-leer').onclick = async ()=>{
+    if(!compBase64) return;
+    const btn = document.getElementById('r-comp-leer');
+    const status = document.getElementById('r-comp-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo...`;
+    const prompt = `Esta es una captura de un comprobante de pago (Binance, transferencia, etc). Extraé el monto pagado y respondé ÚNICAMENTE con un JSON: {"monto": <número entero o decimal, sin símbolos, o null si no se ve>}`;
+    try{
+      const texto = await llamarGemini(prompt, compBase64, compMediaType);
+      const clean = texto.replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(clean);
+      if(parsed.monto!=null){
+        document.getElementById('r-monto').value = parsed.monto;
+        status.innerHTML = `<span class="gain">Monto leído: ${money(parsed.monto)}</span>`;
+      }else{
+        status.innerHTML = `<span class="muted">No pude leer el monto, cargalo a mano.</span>`;
+      }
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('modal-save').onclick = async ()=>{
     reel.numero = Number(document.getElementById('r-numero').value)||siguienteNumero;
     reel.fecha_publicacion = document.getElementById('r-fecha').value;
@@ -1337,6 +1458,43 @@ function openReelModal(infId, negId, existingReel){
     overlay.remove();
     render();
   };
+}
+
+function buildShareText(inf){
+  const stats = (inf.historial_estadisticas||[]).slice().sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+  let txt = `${inf.usuario_ig}\n`;
+  if(inf.link_ig) txt += `Instagram: ${inf.link_ig}\n`;
+  if(inf.categoria) txt += `Categoría: ${inf.categoria}\n`;
+  if(inf.seguidores) txt += `Seguidores: ${Number(inf.seguidores).toLocaleString('es-AR')}\n`;
+  if(inf.vista_reel_min) txt += `Vista mínima de reel: ${Number(inf.vista_reel_min).toLocaleString('es-AR')}\n`;
+  if(inf.publico_masculino_pct) txt += `Audiencia masculina: ${inf.publico_masculino_pct}%\n`;
+  if(stats){
+    if(stats.pais_principal) txt += `País principal: ${stats.pais_principal}\n`;
+    if(stats.rango_edad_principal) txt += `Rango de edad: ${stats.rango_edad_principal}\n`;
+    if(stats.captura_url){
+      txt += `Captura original de las estadísticas: ${stats.captura_url}\n`;
+    }else{
+      txt += `(sin captura de estadísticas guardada todavía)\n`;
+    }
+  }else{
+    txt += `(sin estadísticas cargadas todavía)\n`;
+  }
+  return txt;
+}
+
+async function compartirConMichael(infId){
+  const inf = state.influencers.find(i=>i.id===infId);
+  const texto = buildShareText(inf);
+  if(navigator.share){
+    try{ await navigator.share({ text: texto }); }catch(e){ /* el usuario canceló, no hacer nada */ }
+  }else{
+    try{
+      await navigator.clipboard.writeText(texto);
+      alert('Copiado al portapapeles — pegalo donde le hablás a Michael.');
+    }catch(e){
+      alert('No se pudo copiar automáticamente. Copiá este texto a mano:\n\n' + texto);
+    }
+  }
 }
 
 function openDescMichaelModal(infId){
@@ -1450,7 +1608,8 @@ function openMensajeIAModal(infId, negId){
       pago: "Avisale que ya le enviaste el pago acordado, indicando el medio de pago.",
       rechazo: "Avisale con buena onda que esta vez la marca no aprobó su perfil, sin dar detalles internos, y decile que lo guardás para futuras campañas."
     };
-    const prompt = `Sos un intermediario de marketing de influencers en Argentina que le escribe por WhatsApp a un influencer de Instagram. Escribí un mensaje corto (máximo 4 líneas), natural, en español rioplatense, informal pero profesional, sin emojis de más. ${objetivos[motivo]} Datos de contexto: ${contexto} Respondé ÚNICAMENTE con el texto del mensaje, sin comillas, sin explicaciones.`;
+    const paisTexto = inf.pais ? `El influencer es de ${inf.pais}, adaptá modismos y tono a cómo habla la gente ahí (no uses "vos/che" si no es de Argentina).` : 'Usá español neutro latinoamericano.';
+    const prompt = `Sos un intermediario de marketing de influencers que le escribe por WhatsApp a un influencer de Instagram. Escribí un mensaje corto (máximo 4 líneas), natural, informal pero profesional, sin emojis de más. ${paisTexto} ${objetivos[motivo]} Datos de contexto: ${contexto} Respondé ÚNICAMENTE con el texto del mensaje, sin comillas, sin explicaciones.`;
     try{
       const texto = await llamarGemini(prompt);
       document.getElementById('mi-texto').value = texto.trim();
@@ -1536,10 +1695,11 @@ function openStatsModal(infId){
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
 
-  let base64Data = null, mediaType = null;
+  let base64Data = null, mediaType = null, archivoOriginal = null;
   document.getElementById('s-file').onchange = (e)=>{
     const file = e.target.files[0];
     if(!file) return;
+    archivoOriginal = file;
     mediaType = file.type;
     const reader = new FileReader();
     reader.onload = ()=>{
@@ -1580,13 +1740,31 @@ function openStatsModal(infId){
   document.getElementById('modal-save').onclick = async ()=>{
     const fecha = document.getElementById('s-fecha').value;
     if(!fecha){ alert('Falta la fecha'); return; }
+    const btnGuardar = document.getElementById('modal-save');
+    const status = document.getElementById('s-status');
     const entry = {
       id: uid(), fecha,
       pct_masculino: document.getElementById('s-masc').value!=='' ? Number(document.getElementById('s-masc').value) : null,
       pct_femenino: document.getElementById('s-fem').value!=='' ? Number(document.getElementById('s-fem').value) : null,
       pais_principal: document.getElementById('s-pais').value.trim(),
-      rango_edad_principal: document.getElementById('s-edad').value.trim()
+      rango_edad_principal: document.getElementById('s-edad').value.trim(),
+      captura_url: null
     };
+    const supa = getSupabaseClient();
+    if(supa && archivoOriginal){
+      btnGuardar.disabled = true;
+      status.innerHTML = `<span class="spinner"></span>Subiendo la captura...`;
+      try{
+        const path = `${inf.id}/${Date.now()}_${archivoOriginal.name}`;
+        const { error } = await supa.storage.from('capturas').upload(path, archivoOriginal);
+        if(error) throw error;
+        const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path);
+        entry.captura_url = urlData.publicUrl;
+      }catch(err){
+        console.error('Error subiendo captura', err);
+        status.innerHTML = `<span class="pct-bad">No se pudo subir la captura (¿existe el bucket "capturas"?). Se guardan los datos igual, sin la imagen.</span>`;
+      }
+    }
     inf.historial_estadisticas = inf.historial_estadisticas || [];
     inf.historial_estadisticas.push(entry);
     if(entry.pct_masculino!=null) inf.publico_masculino_pct = entry.pct_masculino;
@@ -1628,6 +1806,40 @@ function attachEvents(){
     if(e.target.files[0]) restoreBackup(e.target.files[0]);
     e.target.value = '';
   };
+
+  if(state.view==='portfolio'){
+    const casos = [];
+    state.influencers.forEach(inf=>{
+      (inf.negociaciones||[]).forEach(neg=>{
+        const reelsConVideo = (neg.reels||[]).filter(r=>r.link_video_descargado);
+        if(reelsConVideo.length){
+          const ganancia = (Number(neg.presupuesto_marca)||0)-(Number(neg.pago_final)||0);
+          casos.push({inf, neg, reelsConVideo, ganancia});
+        }
+      });
+    });
+    document.querySelectorAll('[data-caso-exito]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const i = btn.dataset.casoExito;
+        const c = casos[i];
+        const status = document.getElementById(`caso-status-${i}`);
+        const textarea = document.getElementById(`caso-texto-${i}`);
+        btn.disabled = true;
+        status.innerHTML = `<span class="spinner"></span>Escribiendo...`;
+        const contexto = `Influencer: ${c.inf.usuario_ig} (${c.inf.categoria||'sin categoría'}, ${c.inf.seguidores?Number(c.inf.seguidores).toLocaleString('es-AR')+' seguidores':'seguidores sin dato'}). Marca: ${c.neg.marca}. Reels publicados: ${c.reelsConVideo.length} de ${c.neg.num_reels||5}. Ganancia generada: ${money(c.ganancia)}.`;
+        const prompt = `Escribí un caso de éxito corto (máximo 4 líneas) para mostrarle a otra agencia o marca, sobre esta campaña de influencer marketing ya realizada. Español profesional, sin exagerar, basado solo en estos datos reales: ${contexto}`;
+        try{
+          const texto = await llamarGemini(prompt);
+          textarea.value = texto.trim();
+          textarea.style.display = 'block';
+          status.textContent = 'Listo — lo podés copiar del cuadro.';
+        }catch(err){
+          status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+        }
+        btn.disabled = false;
+      };
+    });
+  }
 
   if(state.view==='mensajes'){
     document.querySelectorAll('[data-copy-msg]').forEach(btn=>{
@@ -1717,6 +1929,7 @@ function attachEvents(){
 
   if(state.view==='detail'){
     document.getElementById('back-to-pool').onclick = ()=>{ state.view='pool'; render(); };
+    document.getElementById('btn-compartir').onclick = ()=>compartirConMichael(state.detailId);
     document.getElementById('btn-desc-michael').onclick = ()=>openDescMichaelModal(state.detailId);
     document.getElementById('btn-edit-profile').onclick = ()=>{
       const inf = state.influencers.find(i=>i.id===state.detailId);
