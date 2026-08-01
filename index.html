@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -910,6 +911,7 @@ function renderDetail(){
       </div>
       <div>
         ${inf.link_ig ? `<a href="${inf.link_ig}" target="_blank">Ver Instagram →</a>` : ''}
+        <button class="ghost" id="btn-desc-michael" style="margin-left:10px">Descripción para Michael</button>
         <button class="ghost" id="btn-edit-profile" style="margin-left:10px">Editar perfil</button>
         <button class="ghost" id="btn-delete-inf" style="margin-left:10px; color:var(--coral); border-color:var(--coral-dim)">Eliminar</button>
       </div>
@@ -1040,7 +1042,13 @@ function openInfluencerModal(existing){
         </div>
         <div class="field"><label>Público masculino (%)</label><input id="m-pct" type="number" min="0" max="100" value="${inf.publico_masculino_pct}"></div>
         <div class="field"><label>Seguidores</label><input id="m-seguidores" type="number" value="${inf.seguidores}" placeholder="ej: 150000"></div>
-        <div class="field"><label>Vista mínima de reel (el más bajo)</label><input id="m-vistamin" type="number" value="${inf.vista_reel_min}" placeholder="ej: 45000"></div>
+        <div class="field"><label>Vista mínima de reel (el más bajo)</label><input id="m-vistamin" type="number" value="${inf.vista_reel_min}" placeholder="ej: 45000">
+          <div style="margin-top:8px;">
+            <input type="file" id="m-datos-file" accept="image/*" style="font-size:11px">
+            <button class="ghost" id="m-datos-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer con IA</button>
+            <div id="m-datos-status" class="ia-note"></div>
+          </div>
+        </div>
         <div class="field"><label>Prioridad</label>
           <select id="m-prioridad">
             <option ${inf.prioridad==='Alta'?'selected':''}>Alta</option>
@@ -1101,6 +1109,43 @@ function openInfluencerModal(existing){
     btn.disabled = false;
   };
 
+  let datosBase64 = null, datosMediaType = null;
+  document.getElementById('m-datos-file').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    datosMediaType = file.type;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      datosBase64 = reader.result.split(',')[1];
+      document.getElementById('m-datos-leer').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('m-datos-leer').onclick = async ()=>{
+    if(!datosBase64) return;
+    const btn = document.getElementById('m-datos-leer');
+    const status = document.getElementById('m-datos-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo...`;
+    const prompt = `Esta es una captura de un perfil de Instagram, puede mostrar la cantidad de seguidores y/o la grilla de reels con su contador de vistas. Extraé: 1) la cantidad de seguidores si se ve, y 2) si se ven varios reels con su número de vistas, el MÁS BAJO de todos. Respondé ÚNICAMENTE con un JSON sin texto adicional: {"seguidores": <número entero o null>, "vista_minima": <número entero o null>}`;
+    try{
+      const texto = await llamarGemini(prompt, datosBase64, datosMediaType);
+      const clean = texto.replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(clean);
+      let encontrado = [];
+      if(parsed.seguidores!=null){ document.getElementById('m-seguidores').value = parsed.seguidores; encontrado.push('seguidores'); }
+      if(parsed.vista_minima!=null){ document.getElementById('m-vistamin').value = parsed.vista_minima; encontrado.push('vista mínima'); }
+      status.innerHTML = encontrado.length ? `<span class="gain">Completado: ${encontrado.join(' y ')}</span>` : `<span class="muted">No pude leer esos datos en esta captura.</span>`;
+    }catch(err){
+      if(err.message==='SIN_CLAVE'){
+        status.innerHTML = 'Configurá la IA primero.';
+      }else{
+        status.innerHTML = `<span class="pct-bad">Error: ${err.message}</span>`;
+      }
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
@@ -1135,7 +1180,9 @@ function openNegModal(infId, existingNeg){
         <div class="field"><label>Marca</label><input id="n-marca" value="${neg.marca}" placeholder="1xBet, Betano..."></div>
         <div class="field"><label>Fecha</label><input id="n-fecha" type="date" value="${neg.fecha}"></div>
         <div class="field"><label>Presupuesto de la marca ($)</label><input id="n-presupuesto" type="number" value="${neg.presupuesto_marca}"></div>
-        <div class="field"><label>Oferta inicial al influencer ($)</label><input id="n-oferta" type="number" value="${neg.oferta_inicial}"></div>
+        <div class="field"><label>Oferta inicial al influencer ($)</label><input id="n-oferta" type="number" value="${neg.oferta_inicial}">
+          <div id="n-oferta-sugerida" class="ia-note"></div>
+        </div>
         <div class="field"><label>Pago final acordado ($)</label><input id="n-pago" type="number" value="${neg.pago_final}"></div>
         <div class="field"><label>Estado (Michael)</label>
           <select id="n-estado">
@@ -1172,6 +1219,13 @@ function openNegModal(infId, existingNeg){
   document.body.appendChild(overlay);
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  if(!existingNeg){
+    const sug = sugerirOferta(inf);
+    if(sug){
+      document.getElementById('n-oferta-sugerida').innerHTML = `Sugerido: <span class="gain">${money(sug.promedio)}</span> (promedio de ${sug.casos} negociación${sug.casos>1?'es':''} con seguidores parecidos) <span style="color:var(--gold); cursor:pointer; text-decoration:underline" id="usar-sugerencia">Usar</span>`;
+      document.getElementById('usar-sugerencia').onclick = ()=>{ document.getElementById('n-oferta').value = sug.promedio; };
+    }
+  }
   document.getElementById('modal-save').onclick = async ()=>{
     neg.marca = document.getElementById('n-marca').value.trim();
     if(!neg.marca){ alert('Falta el nombre de la marca'); return; }
@@ -1284,6 +1338,71 @@ function openReelModal(infId, negId, existingReel){
     overlay.remove();
     render();
   };
+}
+
+function openDescMichaelModal(infId){
+  const inf = state.influencers.find(i=>i.id===infId);
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>Descripción para Michael <span class="close" id="modal-close">×</span></h2>
+      <button class="primary" id="desc-generar" style="margin-bottom:14px">Generar</button>
+      <div id="desc-status" class="ia-note"></div>
+      <div class="field"><label>Texto (editable)</label><textarea id="desc-texto" rows="6"></textarea></div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cerrar</button>
+        <button class="primary" id="desc-copiar">Copiar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('desc-generar').onclick = async ()=>{
+    const status = document.getElementById('desc-status');
+    const btn = document.getElementById('desc-generar');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Escribiendo...`;
+    const contexto = `Usuario de Instagram: ${inf.usuario_ig}. Link: ${inf.link_ig||'sin link'}. Categoría: ${inf.categoria||'sin definir'}. Seguidores: ${inf.seguidores||'sin dato'}. Público masculino: ${inf.publico_masculino_pct||'sin dato'}%. Vista mínima de reel: ${inf.vista_reel_min||'sin dato'}.`;
+    const prompt = `Escribí una descripción corta (máximo 3 líneas) de este perfil de Instagram para presentárselo a un coordinador de marca (Michael), explicando por qué conviene aprobarlo para una campaña. Español rioplatense, directo, profesional, sin inventar datos que no te di. Datos: ${contexto}`;
+    try{
+      const texto = await llamarGemini(prompt);
+      document.getElementById('desc-texto').value = texto.trim();
+      status.textContent = 'Listo.';
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+  document.getElementById('desc-copiar').onclick = ()=>{
+    const texto = document.getElementById('desc-texto').value;
+    if(!texto) return;
+    navigator.clipboard.writeText(texto).then(()=>{
+      const btn = document.getElementById('desc-copiar');
+      btn.textContent = 'Copiado ✓';
+      setTimeout(()=>btn.textContent='Copiar', 1500);
+    });
+  };
+}
+
+function sugerirOferta(inf){
+  const seg = Number(inf.seguidores);
+  if(!seg) return null;
+  const rango = 0.4;
+  const ofertas = [];
+  state.influencers.forEach(otro=>{
+    if(otro.id===inf.id) return;
+    const otroSeg = Number(otro.seguidores);
+    if(!otroSeg) return;
+    if(otroSeg < seg*(1-rango) || otroSeg > seg*(1+rango)) return;
+    (otro.negociaciones||[]).forEach(neg=>{
+      if(neg.oferta_inicial) ofertas.push(Number(neg.oferta_inicial));
+    });
+  });
+  if(!ofertas.length) return null;
+  const promedio = ofertas.reduce((a,b)=>a+b,0) / ofertas.length;
+  return { promedio: Math.round(promedio), casos: ofertas.length };
 }
 
 function openMensajeIAModal(infId, negId){
@@ -1599,6 +1718,7 @@ function attachEvents(){
 
   if(state.view==='detail'){
     document.getElementById('back-to-pool').onclick = ()=>{ state.view='pool'; render(); };
+    document.getElementById('btn-desc-michael').onclick = ()=>openDescMichaelModal(state.detailId);
     document.getElementById('btn-edit-profile').onclick = ()=>{
       const inf = state.influencers.find(i=>i.id===state.detailId);
       openInfluencerModal(inf);
