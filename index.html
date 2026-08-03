@@ -83,6 +83,9 @@
   .badge.Aprobado{background:var(--teal-dim); color:#a6ecdf;}
   .badge.Rechazado{background:var(--coral-dim); color:#ffc9b8;}
   .badge.EnCampaña{background:var(--gold-dim); color:#ffe4ad;}
+  .badge.Pendiente{background:#3a3d24; color:#e0d98c;}
+  .badge.Pedido{background:var(--gold-dim); color:#ffe4ad;}
+  .badge.Recibido{background:var(--teal-dim); color:#a6ecdf;}
   .empty-state{text-align:center; padding:50px 20px; color:var(--text3);}
 
   .overlay{position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto; z-index:50;}
@@ -152,6 +155,11 @@
   .chat-input-row{display:flex; gap:10px;}
   .chat-input-row textarea{flex:1; resize:none;}
 
+  @media print{
+    header, .modal-actions, #btn-imprimir, #btn-edit-profile, #btn-delete-inf, #btn-compartir, #btn-desc-michael, .back-link, [data-edit-neg], [data-delete-neg], [data-msg-ia], [data-duplicar-neg], [data-new-reel], [data-new-tramo], [data-edit-reel], [data-edit-tramo], [data-new-contacto], [data-new-red], [data-edit-red], [data-delete-red]{display:none !important;}
+    body{background:#fff; color:#000;}
+    .detail-section{border-color:#ccc; page-break-inside:avoid;}
+  }
   @media (max-width:600px){
     header{padding:16px;}
     main{padding:16px;}
@@ -190,6 +198,8 @@
 <script>
 const CATEGORIAS = ["Fútbol","Memes","Entretenimiento","Streamers","Otro"];
 const PAISES = ["Argentina","Perú","México","Colombia","Chile","Ecuador","Otro"];
+const PLATAFORMAS = ["Instagram","TikTok","YouTube","Facebook","Twitter/X","Kick","Twitch","Otra"];
+const FUENTES = ["Búsqueda directa","Madriguera de conejo (sugeridas)","Comentarios","TikTok cruzado","Otra plataforma paga","Recomendado por otro influencer","Otro"];
 const ESTADOS = ["Standby","Aprobado","Rechazado","En Campaña"];
 const MEDIOS_PAGO = ["Binance Pay ID","USDT TRC20","CBU/CVU","Lemon Cash","Transferencia","Otro"];
 const ESTADOS_PAGO = ["Pendiente","Enviado","Confirmado"];
@@ -230,6 +240,7 @@ function migrate(inf){
   inf.historial_estadisticas = inf.historial_estadisticas || [];
   inf.codigo_promocional = inf.codigo_promocional || '';
   inf.logo_link = inf.logo_link || '';
+  inf.redes = inf.redes || [];
   if(!inf.historial_contacto){
     inf.historial_contacto = [];
     if(inf.ultimo_contacto_fecha){
@@ -239,6 +250,7 @@ function migrate(inf){
   inf.negociaciones = (inf.negociaciones||[]).map(neg=>{
     neg.num_reels = neg.num_reels || 5;
     neg.modalidad_pago = neg.modalidad_pago || '50/50';
+    neg.tramos = neg.tramos || [];
     if(!inf.codigo_promocional && neg.codigo_promocional) inf.codigo_promocional = neg.codigo_promocional;
     if(!inf.logo_link && neg.logo_link) inf.logo_link = neg.logo_link;
     if(!neg.reels){
@@ -345,6 +357,7 @@ async function loadData(){
   state.influencers = state.influencers.map(migrate);
   state.chatHistorial = await loadChatHistory();
   state.plantillas = await loadPlantillas();
+  state.notasGenerales = await loadNotasGenerales();
   render();
 }
 
@@ -607,6 +620,32 @@ async function loadChatHistory(){
   }
 }
 
+async function loadNotasGenerales(){
+  const supa = getSupabaseClient();
+  if(supa){
+    try{
+      const { data, error } = await supa.from('crm_influencers').select('data').eq('id','notas_generales').maybeSingle();
+      if(error) throw error;
+      return (data && data.data) ? data.data : '';
+    }catch(e){
+      const raw = localStorage.getItem('tmfix_notas_cache');
+      return raw || '';
+    }
+  }
+  return localStorage.getItem('tmfix_notas_cache') || '';
+}
+
+async function saveNotasGenerales(){
+  try{ localStorage.setItem('tmfix_notas_cache', state.notasGenerales||''); }catch(e){}
+  const supa = getSupabaseClient();
+  if(!supa) return;
+  try{
+    await supa.from('crm_influencers').upsert({id:'notas_generales', data: state.notasGenerales||'', updated_at: new Date().toISOString()});
+  }catch(e){
+    console.error('Error guardando notas', e);
+  }
+}
+
 async function loadPlantillas(){
   const supa = getSupabaseClient();
   if(supa){
@@ -685,6 +724,11 @@ function getAlerts(){
           alerts.push({tipo:'warn', texto:`${inf.usuario_ig} — sin subir reel nuevo hace ${daysBetween(ultimo.fecha_publicacion, today)} días (${reels.length}/${numReels} de ${neg.marca})`, infId: inf.id});
         }
       }
+      const tramos = neg.tramos||[];
+      if((neg.estado==='Aprobado'||neg.estado==='En Campaña') && reels.length>0 && tramos.some(t=>t.estado==='Pendiente')){
+        const pendiente = tramos.find(t=>t.estado==='Pendiente');
+        alerts.push({tipo:'pago', texto:`${inf.usuario_ig} — ya subió reels, pedile a Michael el tramo de ${money(pendiente.monto)} de ${neg.marca}`, infId: inf.id});
+      }
     });
     if(inf.historial_contacto && inf.historial_contacto.length && !estaOcupado(inf)){
       const ultimoContacto = inf.historial_contacto.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||''))[inf.historial_contacto.length-1];
@@ -692,6 +736,14 @@ function getAlerts(){
       if(ultimoContacto.fecha && daysBetween(ultimoContacto.fecha, today) >= 14 && !yaFueAprobado){
         alerts.push({tipo:'warn', texto:`${inf.usuario_ig} — se enfrió, hace ${daysBetween(ultimoContacto.fecha, today)} días sin novedades. Reintentar o descartar.`, infId: inf.id});
       }
+    }
+    (inf.redes||[]).forEach(r=>{
+      if(r.activa!==false && r.fecha_actualizacion && daysBetween(r.fecha_actualizacion, today)>=90){
+        alerts.push({tipo:'warn', texto:`${inf.usuario_ig} — su cuenta de ${r.plataforma} (${r.usuario||'sin usuario'}) tiene datos de hace ${daysBetween(r.fecha_actualizacion, today)} días, capaz conviene actualizarlos.`, infId: inf.id});
+      }
+    });
+    if(inf.cooldown_hasta && inf.cooldown_hasta <= today && !estaOcupado(inf)){
+      alerts.push({tipo:'compress', texto:`${inf.usuario_ig} — ya venció el cooldown con la otra marca, lo podés reofrecer.`, infId: inf.id});
     }
   });
   return alerts;
@@ -758,12 +810,14 @@ function render(){
 function renderDashboard(){
   const alerts = getAlerts();
   const cartera = state.influencers.filter(esCarteraDisponible).length;
+  const cargadosHoy = state.influencers.filter(i=>i.fecha_creacion===todayStr()).length;
   return `
     <div class="cards">
       <div class="card"><div class="label">Total influencers</div><div class="value">${state.influencers.length}</div></div>
       <div class="card money"><div class="label">Ganancia estimada</div><div class="value">${money(totalGanancia())}</div></div>
       <div class="card"><div class="label">Cuentas aprobadas</div><div class="value">${totalAprobados()}</div></div>
       <div class="card"><div class="label">Cartera disponible</div><div class="value">${cartera}</div></div>
+      <div class="card"><div class="label">Cargados hoy</div><div class="value">${cargadosHoy}</div></div>
       <div class="card alert"><div class="label">Alertas activas</div><div class="value">${alerts.length}</div></div>
     </div>
     <div class="alerts-box">
@@ -775,6 +829,7 @@ function renderDashboard(){
         </div>`).join('') : '<div class="empty-alerts">Sin alertas por ahora.</div>'}
     </div>
     <button class="primary" id="btn-new-from-dash">+ Nuevo influencer</button>
+    <button class="ghost" id="btn-carga-rapida" style="margin-left:10px">⚡ Carga rápida</button>
 
     <div class="detail-section" style="margin-top:24px">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -790,12 +845,13 @@ function renderPool(){
   const cat = document.getElementById('f-cat')?.value || '';
   const estado = document.getElementById('f-estado')?.value || '';
   const preca = document.getElementById('f-preca')?.value || '';
+  const plataforma = document.getElementById('f-plataforma')?.value || '';
   const search = document.getElementById('f-search')?.value?.toLowerCase() || '';
   let rows = state.influencers;
 
   return `
     <div class="toolbar">
-      <input class="search" id="f-search" placeholder="Buscar por usuario de Instagram..." value="${search}">
+      <input class="search" id="f-search" placeholder="Buscar por usuario (cualquier red)..." value="${search}">
       <select id="f-cat">
         <option value="">Todas las categorías</option>
         ${CATEGORIAS.map(c=>`<option ${cat===c?'selected':''}>${c}</option>`).join('')}
@@ -811,6 +867,10 @@ function renderPool(){
         <option ${preca==='Sin datos'?'selected':''}>Sin datos</option>
         <option value="Cartera" ${preca==='Cartera'?'selected':''}>Cartera disponible</option>
       </select>
+      <select id="f-plataforma">
+        <option value="">Todas las plataformas</option>
+        ${PLATAFORMAS.map(p=>`<option ${plataforma===p?'selected':''}>${p}</option>`).join('')}
+      </select>
       <button class="ghost" id="btn-export">Exportar CSV</button>
       <button class="primary" id="btn-new">+ Nuevo influencer</button>
     </div>
@@ -822,11 +882,19 @@ function renderTable(){
   const cat = document.getElementById('f-cat')?.value || '';
   const estado = document.getElementById('f-estado')?.value || '';
   const preca = document.getElementById('f-preca')?.value || '';
+  const plataforma = document.getElementById('f-plataforma')?.value || '';
   const search = document.getElementById('f-search')?.value?.toLowerCase() || '';
 
   let rows = state.influencers.filter(inf=>{
     if(cat && inf.categoria !== cat) return false;
-    if(search && !inf.usuario_ig.toLowerCase().includes(search)) return false;
+    if(search){
+      const enPrincipal = inf.usuario_ig.toLowerCase().includes(search);
+      const enRedes = (inf.redes||[]).some(r=>(r.usuario||'').toLowerCase().includes(search));
+      if(!enPrincipal && !enRedes) return false;
+    }
+    if(plataforma==='Instagram'){
+      // la cuenta principal siempre es Instagram, así que pasa siempre
+    }else if(plataforma && !(inf.redes||[]).some(r=>r.plataforma===plataforma)) return false;
     if(preca==='Cartera' && !esCarteraDisponible(inf)) return false;
     else if(preca && preca!=='Cartera' && precalificacion(inf).estado !== preca) return false;
     if(estado){
@@ -835,16 +903,29 @@ function renderTable(){
     }
     return true;
   });
+  state.ultimoFiltroPool = rows;
 
   if(!rows.length){
     return `<div class="empty-state">No hay influencers que coincidan con estos filtros.</div>`;
   }
 
   return `
+    ${state.poolSeleccionados && state.poolSeleccionados.size ? `
+      <div class="alerts-box" style="margin-bottom:14px; border-color:var(--gold-dim);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>${state.poolSeleccionados.size} seleccionado${state.poolSeleccionados.size>1?'s':''}</span>
+          <span>
+            ${state.poolSeleccionados.size>=2 && state.poolSeleccionados.size<=3 ? `<button class="ghost" id="btn-comparar">Comparar seleccionados</button>` : ''}
+            <button class="primary" id="btn-generar-lista">Generar lista para Michael</button>
+            <button class="ghost" id="btn-limpiar-seleccion" style="margin-left:8px;">Limpiar selección</button>
+          </span>
+        </div>
+      </div>
+    ` : ''}
     <div class="table-scroll">
     <table>
       <thead><tr>
-        <th>Usuario IG</th><th>Categoría</th><th>% Masculino</th><th>Precalificación</th><th>Prioridad</th><th>Último estado</th><th>Marca</th>
+        <th></th><th>Usuario IG</th><th>Categoría</th><th>% Masculino</th><th>Precalificación</th><th>Prioridad</th><th>Último estado</th><th>Marca</th>
       </tr></thead>
       <tbody>
         ${rows.map(inf=>{
@@ -853,7 +934,9 @@ function renderTable(){
           const pctClass = pct < 60 ? 'pct-bad' : 'pct-ok';
           const pre = precalificacion(inf);
           const preClass = pre.estado==='Precalificado' ? 'gain' : pre.estado==='Descartado' ? 'pct-bad' : 'muted';
+          const marcado = state.poolSeleccionados && state.poolSeleccionados.has(inf.id);
           return `<tr class="row-click" data-open="${inf.id}">
+            <td style="width:30px" onclick="event.stopPropagation()"><input type="checkbox" data-seleccionar="${inf.id}" ${marcado?'checked':''} style="width:auto"></td>
             <td>${inf.usuario_ig}</td>
             <td>${inf.categoria||'—'}</td>
             <td class="${preClass}">${pre.estado}</td>
@@ -983,6 +1066,62 @@ function renderHerramientas(){
   });
   casos.sort((a,b)=>(Number(a.inf.seguidores)||0)-(Number(b.inf.seguidores)||0));
 
+  const desde = document.getElementById('cot-desde')?.value || '';
+  const hasta = document.getElementById('cot-hasta')?.value || '';
+  const casosFiltrados = casos.filter(c=>{
+    if(desde && (!c.neg.fecha || c.neg.fecha < desde)) return false;
+    if(hasta && (!c.neg.fecha || c.neg.fecha > hasta)) return false;
+    return true;
+  });
+
+  // Ganancia por mes
+  const porMes = {};
+  state.influencers.forEach(inf=>{
+    (inf.negociaciones||[]).forEach(neg=>{
+      if(neg.estado!=='Aprobado' && neg.estado!=='En Campaña') return;
+      (neg.reels||[]).forEach(r=>{
+        if(!r.fecha_publicacion) return;
+        const mes = r.fecha_publicacion.slice(0,7);
+        const numReels = Number(neg.num_reels)||5;
+        const gananciaPorReel = ((Number(neg.presupuesto_marca)||0)-(Number(neg.pago_final)||0))/numReels;
+        porMes[mes] = (porMes[mes]||0) + gananciaPorReel;
+      });
+    });
+  });
+  const meses = Object.keys(porMes).sort();
+  const maxMes = Math.max(1, ...meses.map(m=>porMes[m]));
+
+  // Vista por marca
+  const porMarca = {};
+  state.influencers.forEach(inf=>{
+    (inf.negociaciones||[]).forEach(neg=>{
+      if(!neg.marca) return;
+      if(!porMarca[neg.marca]) porMarca[neg.marca] = {gastado:0, cantidad:0};
+      if(neg.estado==='Aprobado'||neg.estado==='En Campaña'){
+        porMarca[neg.marca].gastado += Number(neg.presupuesto_marca)||0;
+        porMarca[neg.marca].cantidad++;
+      }
+    });
+  });
+
+  // Próximos reels esperados (campañas activas)
+  const proximosReels = [];
+  state.influencers.forEach(inf=>{
+    (inf.negociaciones||[]).forEach(neg=>{
+      if(neg.estado!=='En Campaña') return;
+      const reels = (neg.reels||[]).slice().sort((a,b)=>(a.fecha_publicacion||'').localeCompare(b.fecha_publicacion||''));
+      const numReels = Number(neg.num_reels)||5;
+      if(reels.length && reels.length < numReels){
+        const ultima = reels[reels.length-1].fecha_publicacion;
+        if(ultima){
+          const esperado = new Date(ultima); esperado.setDate(esperado.getDate()+2);
+          proximosReels.push({inf, neg, fechaEsperada: esperado.toISOString().slice(0,10), numero: reels.length+1});
+        }
+      }
+    });
+  });
+  proximosReels.sort((a,b)=>a.fechaEsperada.localeCompare(b.fechaEsperada));
+
   return `
     <p class="muted" style="margin-bottom:16px">Plataformas pagas para buscar influencers con filtro de audiencia (género, país, edad) sin tener que pedir capturas una por una. Para usarlas necesitás crear una cuenta — te conviene hacerlo con el correo de la empresa cuando lo tengas.</p>
     ${HERRAMIENTAS.map(h=>`
@@ -1028,16 +1167,73 @@ function renderHerramientas(){
       </p>
     </div>
 
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Ganancia por mes</h3>
+    ${meses.length ? `
+      <div class="msg-card">
+        <div style="display:flex; align-items:flex-end; gap:10px; height:120px;">
+          ${meses.map(m=>`
+            <div style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%;">
+              <div style="font-size:10px; margin-bottom:4px;" class="mono gain">${money(Math.round(porMes[m]))}</div>
+              <div style="width:100%; background:var(--gold); border-radius:4px 4px 0 0; height:${Math.max(4,(porMes[m]/maxMes)*90)}px;"></div>
+              <div style="font-size:10px; margin-top:4px;" class="muted">${m}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    ` : '<p class="empty-state">Todavía no hay reels publicados en negociaciones aprobadas para graficar.</p>'}
+
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Vista por marca</h3>
+    ${Object.keys(porMarca).length ? `
+      <div class="table-scroll">
+      <table>
+        <thead><tr><th>Marca</th><th>Influencers aprobados</th><th>Total gastado</th></tr></thead>
+        <tbody>
+          ${Object.keys(porMarca).map(m=>`
+            <tr><td>${m}</td><td class="mono">${porMarca[m].cantidad}</td><td class="mono gain">${money(porMarca[m].gastado)}</td></tr>
+          `).join('')}
+        </tbody>
+      </table>
+      </div>
+    ` : '<p class="empty-state">Todavía no hay negociaciones cargadas.</p>'}
+
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Calculadora rápida</h3>
+    <div class="msg-card">
+      <div class="grid2">
+        <div class="field"><label>Presupuesto de la marca ($)</label><input id="calc-presupuesto" type="number"></div>
+        <div class="field"><label>Pago al influencer ($)</label><input id="calc-pago" type="number"></div>
+      </div>
+      <div id="calc-resultado" class="ia-note" style="font-size:16px; margin-top:8px;"></div>
+    </div>
+
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Próximos reels esperados</h3>
+    ${proximosReels.length ? proximosReels.map(p=>`
+      <div class="msg-card">
+        <div class="msg-top"><strong>${p.inf.usuario_ig}</strong><span class="muted">${p.neg.marca}</span></div>
+        <p>Reel ${p.numero} esperado alrededor del <strong>${p.fechaEsperada}</strong> (según la cadencia de los anteriores)</p>
+      </div>
+    `).join('') : '<p class="empty-state">No hay campañas activas con reels pendientes de calcular.</p>'}
+
+    <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Notas internas</h3>
+    <div class="msg-card">
+      <textarea id="notas-generales" rows="6" placeholder="Anotaciones sueltas, ideas, recordatorios generales...">${state.notasGenerales||''}</textarea>
+      <button class="primary" id="btn-guardar-notas" style="margin-top:10px;">Guardar notas</button>
+      <span id="notas-status" class="ia-note"></span>
+    </div>
+
     <h3 style="font-size:13px; text-transform:uppercase; color:var(--text2); margin:28px 0 12px;">Análisis de cotización</h3>
-    <p class="muted" style="margin-bottom:14px">Tus negociaciones aprobadas, ordenadas de menor a mayor cantidad de seguidores, para que veas a ojo cómo se mueve el presupuesto que aprueba Michael. Esto NO calcula ningún patrón solo — es una vista ordenada para que vos lo analices.</p>
-    ${casos.length ? `
+    <p class="muted" style="margin-bottom:10px">Tus negociaciones aprobadas, ordenadas de menor a mayor cantidad de seguidores, para que veas a ojo cómo se mueve el presupuesto que aprueba Michael. Esto NO calcula ningún patrón solo — es una vista ordenada para que vos lo analices.</p>
+    <div class="toolbar" style="margin-bottom:14px;">
+      <div class="field" style="margin:0;"><label>Desde</label><input id="cot-desde" type="date" value="${desde}"></div>
+      <div class="field" style="margin:0;"><label>Hasta</label><input id="cot-hasta" type="date" value="${hasta}"></div>
+    </div>
+    ${casosFiltrados.length ? `
       <div class="table-scroll">
       <table>
         <thead><tr>
           <th>Usuario IG</th><th>Categoría</th><th>Seguidores</th><th>Vista mín.</th><th>% Masculino</th><th>Marca</th><th>Presupuesto aprobado</th>
         </tr></thead>
         <tbody>
-          ${casos.map(c=>`
+          ${casosFiltrados.map(c=>`
             <tr>
               <td>${c.inf.usuario_ig}</td>
               <td>${c.inf.categoria||'—'}</td>
@@ -1051,7 +1247,7 @@ function renderHerramientas(){
         </tbody>
       </table>
       </div>
-    ` : '<p class="empty-state">Todavía no tenés negociaciones aprobadas para analizar. Esta tabla se va a ir llenando sola a medida que Michael te apruebe perfiles.</p>'}
+    ` : '<p class="empty-state">No hay negociaciones aprobadas en ese rango de fechas.</p>'}
   `;
 }
 
@@ -1066,18 +1262,42 @@ function renderDetail(){
     <span class="back-link" id="back-to-pool">← Volver al pool</span>
     <div class="detail-header">
       <div>
-        <h2>${inf.usuario_ig}</h2>
+        <h2>${inf.favorito?'⭐ ':''}${inf.usuario_ig} ${inf.riesgo?`<span class="chip ${inf.riesgo==='Alto'?'pct-bad':inf.riesgo==='Bajo'?'gain':''}" style="font-size:11px;">Riesgo: ${inf.riesgo}</span>`:''}</h2>
         <div class="muted">${inf.categoria||'Sin categoría'} · Público masculino: <span class="${inf.publico_masculino_pct<60?'pct-bad':'pct-ok'}">${inf.publico_masculino_pct||'—'}%</span> · Seguidores: ${inf.seguidores?Number(inf.seguidores).toLocaleString('es-AR'):'—'} · Vista mín.: ${inf.vista_reel_min?Number(inf.vista_reel_min).toLocaleString('es-AR'):'—'}</div>
+        ${(inf.redes&&inf.redes.length) ? `<div class="muted" style="margin-top:4px">Audiencia combinada (todas las cuentas): <span class="mono gain">${((Number(inf.seguidores)||0)+inf.redes.reduce((s,r)=>s+(Number(r.seguidores)||0),0)).toLocaleString('es-AR')}</span></div>` : ''}
         <div class="muted" style="margin-top:4px">Precalificación: <span class="${preClass}">${pre.estado}</span>${pre.motivo?` — ${pre.motivo}`:''}</div>
         <div class="muted" style="margin-top:4px">Código promo: <span class="mono">${inf.codigo_promocional||'—'}</span> · Logo: ${inf.logo_link?`<a href="${inf.logo_link}" target="_blank" style="color:var(--gold)">Ver logo</a>`:'—'}</div>
       </div>
       <div>
         ${inf.link_ig ? `<a href="${inf.link_ig}" target="_blank">Ver Instagram →</a>` : ''}
         <button class="ghost" id="btn-compartir" style="margin-left:10px">Compartir con Michael</button>
+        <button class="ghost" id="btn-imprimir" style="margin-left:10px">Imprimir ficha</button>
         <button class="ghost" id="btn-desc-michael" style="margin-left:10px">Descripción para Michael</button>
         <button class="ghost" id="btn-edit-profile" style="margin-left:10px">Editar perfil</button>
         <button class="ghost" id="btn-delete-inf" style="margin-left:10px; color:var(--coral); border-color:var(--coral-dim)">Eliminar</button>
       </div>
+    </div>
+
+    <div class="detail-section">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h3 style="margin:0">Otras cuentas / redes</h3>
+        <button class="ghost" id="btn-new-red">+ Agregar cuenta</button>
+      </div>
+      ${(inf.redes&&inf.redes.length) ? inf.redes.map(r=>`
+        <div class="contact-entry" style="align-items:center;">
+          <span>
+            <span class="chip" style="margin-right:8px;">${r.plataforma}</span>
+            ${r.activa===false ? '<span class="chip pct-bad" style="margin-right:8px;">Inactiva</span>' : ''}
+            ${r.usuario||'—'} ${r.seguidores?`· ${Number(r.seguidores).toLocaleString('es-AR')} seguidores`:''}
+            ${r.link?` · <a href="${r.link}" target="_blank" style="color:var(--gold)">abrir</a>`:''}
+            ${r.fecha_actualizacion && daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' · <span class="pct-bad" style="font-size:11px;">datos desactualizados</span>' : ''}
+          </span>
+          <span style="display:flex; gap:10px;">
+            <span class="fecha" style="cursor:pointer" data-edit-red="${r.id}">Editar</span>
+            <span class="fecha" style="cursor:pointer; color:var(--coral)" data-delete-red="${r.id}">Eliminar</span>
+          </span>
+        </div>
+      `).join('') : '<p class="muted">Sin otras cuentas cargadas.</p>'}
     </div>
 
     <div class="detail-section">
@@ -1138,12 +1358,15 @@ function renderDetail(){
         const reels = (neg.reels||[]).slice().sort((a,b)=>(a.numero||0)-(b.numero||0));
         const numReels = neg.num_reels||5;
         const pagadoTotal = reels.reduce((s,r)=>s+(Number(r.monto_pagado)||0),0);
+        const cuentaUsada = (!neg.cuenta_id || neg.cuenta_id==='principal') ? `${inf.usuario_ig} (Instagram)` : (()=>{ const rc=(inf.redes||[]).find(x=>x.id===neg.cuenta_id); return rc ? `${rc.usuario||rc.link} (${rc.plataforma})` : `${inf.usuario_ig} (Instagram)`; })();
         return `
         <div class="neg-item">
           <div class="neg-item-top">
             <strong>${neg.marca}</strong>
             <span class="badge ${neg.estado.replace(' ','')}">${neg.estado}</span>
           </div>
+          <div class="muted" style="font-size:12px; margin-bottom:8px;">Cuenta: ${cuentaUsada} ${neg.link_contrato?`· <a href="${neg.link_contrato}" target="_blank" style="color:var(--gold)">Ver contrato</a>`:''}</div>
+          ${(neg.estado_historial&&neg.estado_historial.length) ? `<div class="muted" style="font-size:11px; margin-bottom:8px;">Historial: ${neg.estado_historial.map(h=>`${h.estado} (${h.fecha})`).join(' → ')}</div>` : ''}
           <div class="neg-grid">
             <div><span class="k">Fecha</span><span class="v">${neg.fecha||'—'}</span></div>
             <div><span class="k">Presupuesto marca</span><span class="v">${money(neg.presupuesto_marca)}</span></div>
@@ -1165,15 +1388,29 @@ function renderDetail(){
             </div>
             ${reels.length ? reels.map(r=>`
               <div class="contact-entry">
-                <span>Reel ${r.numero} · ${r.fecha_publicacion||'sin fecha'} ${r.link_reel?`· <a href="${r.link_reel}" target="_blank" style="color:var(--gold)">reel</a>`:''} ${r.link_video_descargado?`· <a href="${r.link_video_descargado}" target="_blank" style="color:var(--gold)">video guardado</a>`:'· <span class="pct-bad">falta descargar</span>'} ${r.monto_pagado?`· ${money(r.monto_pagado)} pagado`:''} ${r.comprimido?'· <span class="gain">comprimido</span>':''}</span>
+                <span>Reel ${r.numero} <span class="chip" style="font-size:10px; padding:1px 7px;">${r.plataforma||'Instagram'}</span> · ${r.fecha_publicacion||'sin fecha'} ${r.link_reel?`· <a href="${r.link_reel}" target="_blank" style="color:var(--gold)">reel</a>`:''} ${r.link_video_descargado?`· <a href="${r.link_video_descargado}" target="_blank" style="color:var(--gold)">video guardado</a>`:'· <span class="pct-bad">falta descargar</span>'} ${r.monto_pagado?`· ${money(r.monto_pagado)} pagado`:''} ${r.comprimido?'· <span class="gain">comprimido</span>':''}</span>
                 <span class="fecha" style="cursor:pointer" data-edit-reel="${neg.id}|${r.id}">Editar</span>
               </div>
             `).join('') : '<p class="muted">Todavía no se subió ningún reel de esta campaña.</p>'}
           </div>
 
+          <div class="contact-log">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span class="k" style="margin:0">Pagos de Michael (tramos) · recibido ${money((neg.tramos||[]).filter(t=>t.estado==='Recibido').reduce((s,t)=>s+(Number(t.monto)||0),0))} de ${money(neg.presupuesto_marca)}</span>
+              <button class="ghost" style="font-size:12px; padding:6px 10px;" data-new-tramo="${neg.id}">+ Tramo</button>
+            </div>
+            ${(neg.tramos&&neg.tramos.length) ? neg.tramos.map(t=>`
+              <div class="contact-entry">
+                <span>${money(t.monto)} · <span class="badge ${t.estado}">${t.estado}</span> ${t.fecha_recibido?`· recibido ${t.fecha_recibido}`:''}</span>
+                <span class="fecha" style="cursor:pointer" data-edit-tramo="${neg.id}|${t.id}">Editar</span>
+              </div>
+            `).join('') : '<p class="muted">Sin tramos cargados — si Michael paga todo junto, cargá uno solo por el total.</p>'}
+          </div>
+
           <div style="display:flex; gap:8px; margin-top:10px;">
             <button class="ghost" data-edit-neg="${neg.id}">Editar</button>
             <button class="ghost" data-msg-ia="${neg.id}">Mensaje con IA</button>
+            <button class="ghost" data-duplicar-neg="${neg.id}">Duplicar</button>
             <button class="ghost" style="color:var(--coral); border-color:var(--coral-dim)" data-delete-neg="${neg.id}">Eliminar</button>
           </div>
         </div>`;
@@ -1183,8 +1420,152 @@ function renderDetail(){
 }
 
 // ---------- Modales ----------
+function abrirComparadorModal(){
+  const seleccionados = state.influencers.filter(i=>state.poolSeleccionados.has(i.id));
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  const filas = [
+    {label:'Categoría', get:i=>i.categoria||'—'},
+    {label:'País', get:i=>i.pais||'—'},
+    {label:'Seguidores', get:i=>i.seguidores?Number(i.seguidores).toLocaleString('es-AR'):'—'},
+    {label:'Vista mínima', get:i=>i.vista_reel_min?Number(i.vista_reel_min).toLocaleString('es-AR'):'—'},
+    {label:'% Masculino', get:i=>i.publico_masculino_pct?i.publico_masculino_pct+'%':'—'},
+    {label:'Precalificación', get:i=>precalificacion(i).estado},
+    {label:'Riesgo', get:i=>i.riesgo||'Sin evaluar'},
+    {label:'Prioridad', get:i=>i.prioridad||'—'},
+    {label:'Último estado', get:i=>{ const ln=lastNeg(i); return ln?ln.estado:'Sin negociación'; }},
+    {label:'Cómo lo encontré', get:i=>i.fuente_captacion||'—'}
+  ];
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:700px">
+      <h2>Comparar influencers <span class="close" id="modal-close">×</span></h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th></th>${seleccionados.map(i=>`<th>${i.usuario_ig}</th>`).join('')}</tr></thead>
+          <tbody>
+            ${filas.map(f=>`<tr><td class="muted">${f.label}</td>${seleccionados.map(i=>`<td class="mono">${f.get(i)}</td>`).join('')}</tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cerrar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+}
+
+function abrirGenerarListaModal(){
+  const seleccionados = state.influencers.filter(i=>state.poolSeleccionados.has(i.id));
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal">
+      <h2>Generar lista para Michael <span class="close" id="modal-close">×</span></h2>
+      <p class="muted" style="margin-bottom:14px">${seleccionados.length} perfil${seleccionados.length>1?'es':''} seleccionado${seleccionados.length>1?'s':''}. Esto crea una negociación en Standby para cada uno (si todavía no la tenía con esta marca) y te arma el texto con los links, listo para mandar.</p>
+      <div class="field"><label>Marca</label><input id="gl-marca" placeholder="1xBet, Betano..."></div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="gl-generar">Generar</button>
+      </div>
+      <div class="field" style="margin-top:14px;"><label>Texto para copiar / compartir</label><textarea id="gl-texto" rows="8" readonly></textarea></div>
+      <div class="modal-actions">
+        <button class="primary" id="gl-compartir">Compartir / Copiar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('gl-generar').onclick = async ()=>{
+    const marca = document.getElementById('gl-marca').value.trim();
+    if(!marca){ alert('Falta el nombre de la marca'); return; }
+    seleccionados.forEach(inf=>{
+      const yaExiste = (inf.negociaciones||[]).some(n=>n.marca.toLowerCase()===marca.toLowerCase());
+      if(!yaExiste){
+        inf.negociaciones = inf.negociaciones || [];
+        inf.negociaciones.push({
+          id:uid(), marca, fecha:todayStr(), presupuesto_marca:'', oferta_inicial:'', pago_final:'',
+          estado:'Standby', motivo_rechazo:'', medio_pago:'', id_pago:'', estado_pago:'Pendiente',
+          num_reels:5, modalidad_pago:'50/50', reels:[], tramos:[]
+        });
+      }
+    });
+    await saveData();
+    state.poolSeleccionados.clear();
+    const texto = `Perfiles para ${marca}:\n\n` + seleccionados.map(inf=>`👤 ${inf.usuario_ig}${inf.seguidores?` (${Number(inf.seguidores).toLocaleString('es-AR')} seguidores)`:''}\n${inf.link_ig||'sin link cargado'}`).join('\n\n');
+    document.getElementById('gl-texto').value = texto;
+  };
+  document.getElementById('gl-compartir').onclick = async ()=>{
+    const texto = document.getElementById('gl-texto').value;
+    if(!texto){ alert('Generá el texto primero'); return; }
+    if(navigator.share){
+      try{ await navigator.share({text:texto}); }catch(e){}
+    }else{
+      navigator.clipboard.writeText(texto);
+      alert('Copiado al portapapeles.');
+    }
+  };
+}
+
+function openCargaRapidaModal(){
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:400px">
+      <h2>Carga rápida <span class="close" id="modal-close">×</span></h2>
+      <p class="muted" style="margin-bottom:14px">Lo mínimo para no perder el candidato. Completás el resto después con calma.</p>
+      <div class="field"><label>Usuario de Instagram</label><input id="cr-usuario" placeholder="@usuario" autofocus></div>
+      <div class="field"><label>Seguidores (si lo viste)</label><input id="cr-seguidores" type="number" placeholder="ej: 150000"></div>
+      <div class="field"><label>Vista mínima de reel (si la viste)</label><input id="cr-vista" type="number" placeholder="ej: 45000"></div>
+      <div class="field"><label>Cómo lo encontré</label>
+        <select id="cr-fuente">
+          <option value="">Seleccionar...</option>
+          ${FUENTES.map(f=>`<option>${f}</option>`).join('')}
+        </select>
+      </div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cerrar</button>
+        <button class="primary" id="cr-guardar">Guardar y cargar otro</button>
+      </div>
+      <div id="cr-contador" class="ia-note" style="margin-top:10px"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  const actualizarContador = ()=>{
+    const hoy = state.influencers.filter(i=>i.fecha_creacion===todayStr()).length;
+    document.getElementById('cr-contador').textContent = `Cargados hoy: ${hoy}`;
+  };
+  actualizarContador();
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('cr-guardar').onclick = async ()=>{
+    const usuario = document.getElementById('cr-usuario').value.trim();
+    if(!usuario){ alert('Falta el usuario de Instagram'); return; }
+    const usuarioNorm = usuario.toLowerCase().replace('@','');
+    const duplicado = state.influencers.find(i=>(i.usuario_ig||'').toLowerCase().replace('@','')===usuarioNorm);
+    if(duplicado && !confirm(`Ya tenés cargado a "${duplicado.usuario_ig}". ¿Guardar igual?`)) return;
+    const inf = {
+      id:uid(), usuario_ig:usuario, link_ig:'', contacto:'', categoria:'', pais:'',
+      fuente_captacion: document.getElementById('cr-fuente').value,
+      publico_masculino_pct:'', seguidores: document.getElementById('cr-seguidores').value, vista_reel_min: document.getElementById('cr-vista').value,
+      prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'',
+      historial_contacto:[], historial_estadisticas:[], negociaciones:[], fecha_creacion: todayStr()
+    };
+    state.influencers.push(inf);
+    await saveData();
+    document.getElementById('cr-usuario').value = '';
+    document.getElementById('cr-seguidores').value = '';
+    document.getElementById('cr-vista').value = '';
+    document.getElementById('cr-usuario').focus();
+    actualizarContador();
+  };
+}
+
 function openInfluencerModal(existing){
-  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', pais:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[]};
+  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', pais:'', fuente_captacion:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[], fecha_creacion: todayStr()};
   const overlay = document.createElement('div');
   overlay.className='overlay';
   overlay.innerHTML = `
@@ -1200,6 +1581,21 @@ function openInfluencerModal(existing){
             ${PAISES.map(p=>`<option ${inf.pais===p?'selected':''}>${p}</option>`).join('')}
           </select>
         </div>
+        <div class="field"><label>Cómo lo encontré</label>
+          <select id="m-fuente">
+            <option value="">Seleccionar...</option>
+            ${FUENTES.map(f=>`<option ${inf.fuente_captacion===f?'selected':''}>${f}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field"><label>Riesgo</label>
+          <select id="m-riesgo">
+            <option value="">Sin evaluar</option>
+            <option ${inf.riesgo==='Bajo'?'selected':''}>Bajo</option>
+            <option ${inf.riesgo==='Medio'?'selected':''}>Medio</option>
+            <option ${inf.riesgo==='Alto'?'selected':''}>Alto</option>
+          </select>
+        </div>
+        <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer; margin-top:22px;"><input type="checkbox" id="m-favorito" style="width:auto" ${inf.favorito?'checked':''}> ⭐ Favorito</label></div>
         <div class="field"><label>Categoría</label>
           <select id="m-categoria">
             <option value="">Seleccionar...</option>
@@ -1336,6 +1732,9 @@ function openInfluencerModal(existing){
     inf.link_ig = document.getElementById('m-link').value.trim();
     inf.contacto = document.getElementById('m-contacto').value.trim();
     inf.pais = document.getElementById('m-pais').value;
+    inf.fuente_captacion = document.getElementById('m-fuente').value;
+    inf.riesgo = document.getElementById('m-riesgo').value;
+    inf.favorito = document.getElementById('m-favorito').checked;
     inf.categoria = document.getElementById('m-categoria').value;
     inf.publico_masculino_pct = document.getElementById('m-pct').value;
     inf.seguidores = document.getElementById('m-seguidores').value;
@@ -1363,6 +1762,12 @@ function openNegModal(infId, existingNeg){
       <h2>${existingNeg?'Editar negociación':'Nueva negociación'} <span class="close" id="modal-close">×</span></h2>
       <div class="grid2">
         <div class="field"><label>Marca</label><input id="n-marca" value="${neg.marca}" placeholder="1xBet, Betano..."></div>
+        <div class="field"><label>Cuenta para esta campaña</label>
+          <select id="n-cuenta">
+            <option value="principal" ${(!neg.cuenta_id||neg.cuenta_id==='principal')?'selected':''}>${inf.usuario_ig} (principal, Instagram)</option>
+            ${(inf.redes||[]).map(r=>`<option value="${r.id}" ${neg.cuenta_id===r.id?'selected':''}>${r.usuario||r.link} (${r.plataforma})</option>`).join('')}
+          </select>
+        </div>
         <div class="field"><label>Fecha</label><input id="n-fecha" type="date" value="${neg.fecha}"></div>
         <div class="field"><label>Presupuesto de la marca ($)</label><input id="n-presupuesto" type="number" value="${neg.presupuesto_marca}"></div>
         <div class="field"><label>Oferta inicial al influencer ($)</label><input id="n-oferta" type="number" value="${neg.oferta_inicial}">
@@ -1393,6 +1798,7 @@ function openNegModal(infId, existingNeg){
             ${ESTADOS_PAGO.map(e=>`<option ${neg.estado_pago===e?'selected':''}>${e}</option>`).join('')}
           </select>
         </div>
+        <div class="field"><label>Link del contrato/acuerdo (opcional)</label><input id="n-contrato" value="${neg.link_contrato||''}" placeholder="link a Drive, PDF, etc."></div>
       </div>
       <div class="field"><label>Motivo de rechazo (opcional)</label><textarea id="n-motivo" rows="2">${neg.motivo_rechazo||''}</textarea>
         <button class="ghost" id="n-motivo-mejorar" style="font-size:11px; padding:5px 10px; margin-top:6px">Redactar profesional con IA</button>
@@ -1430,23 +1836,80 @@ function openNegModal(infId, existingNeg){
   };
   document.getElementById('modal-save').onclick = async ()=>{
     neg.marca = document.getElementById('n-marca').value.trim();
+    neg.cuenta_id = document.getElementById('n-cuenta').value;
     if(!neg.marca){ alert('Falta el nombre de la marca'); return; }
     neg.fecha = document.getElementById('n-fecha').value;
     neg.presupuesto_marca = document.getElementById('n-presupuesto').value;
     neg.oferta_inicial = document.getElementById('n-oferta').value;
     neg.pago_final = document.getElementById('n-pago').value;
-    neg.estado = document.getElementById('n-estado').value;
+    const estadoNuevo = document.getElementById('n-estado').value;
+    if(estadoNuevo !== neg.estado){
+      neg.estado_historial = neg.estado_historial || [];
+      neg.estado_historial.push({estado: estadoNuevo, fecha: todayStr()});
+    }
+    neg.estado = estadoNuevo;
     neg.num_reels = document.getElementById('n-numreels').value || 5;
     neg.modalidad_pago = document.getElementById('n-modalidad').value;
     neg.medio_pago = document.getElementById('n-medio').value;
     neg.id_pago = document.getElementById('n-idpago').value.trim();
     neg.estado_pago = document.getElementById('n-estadopago').value;
+    neg.link_contrato = document.getElementById('n-contrato').value.trim();
     neg.motivo_rechazo = document.getElementById('n-motivo').value.trim();
     neg.reels = neg.reels || [];
     if(!existingNeg){
       inf.negociaciones = inf.negociaciones||[];
       inf.negociaciones.push(neg);
     }
+    await saveData();
+    overlay.remove();
+    render();
+  };
+}
+
+function openTramoModal(infId, negId, existingTramo){
+  const inf = state.influencers.find(i=>i.id===infId);
+  const neg = inf.negociaciones.find(n=>n.id===negId);
+  neg.tramos = neg.tramos || [];
+  const t = existingTramo || {id:uid(), monto:'', estado:'Pendiente', fecha_pedido:'', fecha_recibido:''};
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h2>${existingTramo?'Editar tramo':'Nuevo tramo'} <span class="close" id="modal-close">×</span></h2>
+      <div class="field"><label>Monto de este tramo ($)</label><input id="tr-monto" type="number" value="${t.monto}"></div>
+      <div class="field"><label>Estado</label>
+        <select id="tr-estado">
+          <option ${t.estado==='Pendiente'?'selected':''}>Pendiente</option>
+          <option ${t.estado==='Pedido'?'selected':''}>Pedido</option>
+          <option ${t.estado==='Recibido'?'selected':''}>Recibido</option>
+        </select>
+      </div>
+      <div class="field"><label>Fecha en que lo pediste (opcional)</label><input id="tr-fecha-pedido" type="date" value="${t.fecha_pedido||''}"></div>
+      <div class="field"><label>Fecha en que lo recibiste (opcional)</label><input id="tr-fecha-recibido" type="date" value="${t.fecha_recibido||''}"></div>
+      <div class="modal-actions">
+        ${existingTramo ? `<button class="ghost" style="color:var(--coral); border-color:var(--coral-dim); margin-right:auto" id="modal-delete-tramo">Eliminar</button>` : ''}
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="modal-save">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-delete-tramo')?.addEventListener('click', async ()=>{
+    if(!confirm('¿Eliminar este tramo?')) return;
+    neg.tramos = neg.tramos.filter(x=>x.id!==t.id);
+    await saveData();
+    overlay.remove();
+    render();
+  });
+  document.getElementById('modal-save').onclick = async ()=>{
+    t.monto = document.getElementById('tr-monto').value;
+    t.estado = document.getElementById('tr-estado').value;
+    t.fecha_pedido = document.getElementById('tr-fecha-pedido').value;
+    t.fecha_recibido = document.getElementById('tr-fecha-recibido').value;
+    if(!t.monto){ alert('Falta el monto'); return; }
+    if(!existingTramo) neg.tramos.push(t);
     await saveData();
     overlay.remove();
     render();
@@ -1467,8 +1930,13 @@ function openReelModal(infId, negId, existingReel){
       <div class="grid2">
         <div class="field"><label>N° de reel</label><input id="r-numero" type="number" min="1" value="${reel.numero}"></div>
         <div class="field"><label>Fecha de publicación</label><input id="r-fecha" type="date" value="${reel.fecha_publicacion}"></div>
+        <div class="field"><label>Plataforma</label>
+          <select id="r-plataforma">
+            ${PLATAFORMAS.map(p=>`<option ${(reel.plataforma||'Instagram')===p?'selected':''}>${p}</option>`).join('')}
+          </select>
+        </div>
       </div>
-      <div class="field"><label>Link del reel (Instagram)</label><input id="r-link" value="${reel.link_reel}"></div>
+      <div class="field"><label>Link del reel</label><input id="r-link" value="${reel.link_reel}"></div>
       <div class="field"><label>Link del video descargado (Drive, etc.)</label><input id="r-video" value="${reel.link_video_descargado}"></div>
       <div class="field"><label>Monto pagado por este reel ($, opcional)</label><input id="r-monto" type="number" value="${reel.monto_pagado}">
         <div style="margin-top:8px;">
@@ -1572,6 +2040,7 @@ function openReelModal(infId, negId, existingReel){
 
   document.getElementById('modal-save').onclick = async ()=>{
     reel.numero = Number(document.getElementById('r-numero').value)||siguienteNumero;
+    reel.plataforma = document.getElementById('r-plataforma').value;
     reel.fecha_publicacion = document.getElementById('r-fecha').value;
     reel.link_reel = document.getElementById('r-link').value.trim();
     reel.link_video_descargado = document.getElementById('r-video').value.trim();
@@ -1760,6 +2229,81 @@ function openMensajeIAModal(infId, negId){
   };
 }
 
+function openRedModal(infId, existingRed){
+  const inf = state.influencers.find(i=>i.id===infId);
+  const r = existingRed || {id:uid(), plataforma:'Instagram', usuario:'', link:'', seguidores:'', notas:'', activa:true, codigo_promocional:'', fecha_actualizacion:todayStr()};
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:440px">
+      <h2>${existingRed?'Editar cuenta':'Agregar cuenta'} <span class="close" id="modal-close">×</span></h2>
+      <div class="field"><label>Plataforma</label>
+        <select id="red-plataforma">
+          ${PLATAFORMAS.map(p=>`<option ${r.plataforma===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div class="field"><label>Usuario / nombre</label><input id="red-usuario" value="${r.usuario}" placeholder="@usuario"></div>
+      <div class="field"><label>Link</label><input id="red-link" value="${r.link}" placeholder="https://..."></div>
+      <div class="field"><label>Seguidores (opcional)</label><input id="red-seguidores" type="number" value="${r.seguidores}"></div>
+      <div class="field"><label>Código promocional propio (opcional, si usa uno distinto al principal)</label><input id="red-promo" value="${r.codigo_promocional||''}"></div>
+      <div class="field"><label>Notas (opcional)</label><textarea id="red-notas" rows="2">${r.notas||''}</textarea></div>
+      <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="red-activa" style="width:auto" ${r.activa!==false?'checked':''}> Cuenta activa</label></div>
+      ${r.fecha_actualizacion ? `<p class="ia-note">Datos actualizados por última vez: ${r.fecha_actualizacion}${daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' <span class="pct-bad">(hace más de 90 días, capaz conviene revisar)</span>' : ''}</p>` : ''}
+      <div class="modal-actions">
+        ${existingRed ? `<button class="ghost" id="modal-promover">Promover a principal</button>` : ''}
+        ${existingRed ? `<button class="ghost" style="color:var(--coral); border-color:var(--coral-dim)" id="modal-delete-red">Eliminar</button>` : ''}
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="modal-save">Guardar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-delete-red')?.addEventListener('click', async ()=>{
+    if(!confirm('¿Eliminar esta cuenta?')) return;
+    inf.redes = inf.redes.filter(x=>x.id!==r.id);
+    await saveData();
+    overlay.remove();
+    render();
+  });
+  document.getElementById('modal-promover')?.addEventListener('click', async ()=>{
+    if(!confirm(`Esto va a hacer que "${r.usuario||r.link}" pase a ser la cuenta principal, y la actual (${inf.usuario_ig}) pasa a la lista de otras cuentas. ¿Continuar?`)) return;
+    const principalVieja = {
+      id: uid(), plataforma:'Instagram', usuario: inf.usuario_ig, link: inf.link_ig,
+      seguidores: inf.seguidores, notas:'Cuenta principal anterior', activa:true,
+      codigo_promocional: inf.codigo_promocional, fecha_actualizacion: todayStr()
+    };
+    inf.usuario_ig = r.usuario || inf.usuario_ig;
+    inf.link_ig = r.link || '';
+    inf.seguidores = r.seguidores || '';
+    if(r.codigo_promocional) inf.codigo_promocional = r.codigo_promocional;
+    inf.redes = inf.redes.filter(x=>x.id!==r.id);
+    inf.redes.push(principalVieja);
+    await saveData();
+    overlay.remove();
+    render();
+  });
+  document.getElementById('modal-save').onclick = async ()=>{
+    r.plataforma = document.getElementById('red-plataforma').value;
+    r.usuario = document.getElementById('red-usuario').value.trim();
+    r.link = document.getElementById('red-link').value.trim();
+    const seguidoresNuevo = document.getElementById('red-seguidores').value;
+    if(seguidoresNuevo !== String(r.seguidores||'')) r.fecha_actualizacion = todayStr();
+    r.seguidores = seguidoresNuevo;
+    r.codigo_promocional = document.getElementById('red-promo').value.trim();
+    r.notas = document.getElementById('red-notas').value.trim();
+    r.activa = document.getElementById('red-activa').checked;
+    if(!r.fecha_actualizacion) r.fecha_actualizacion = todayStr();
+    if(!r.usuario && !r.link){ alert('Cargá al menos el usuario o el link'); return; }
+    inf.redes = inf.redes || [];
+    if(!existingRed) inf.redes.push(r);
+    await saveData();
+    overlay.remove();
+    render();
+  };
+}
+
 function openContactoModal(infId){
   const inf = state.influencers.find(i=>i.id===infId);
   const overlay = document.createElement('div');
@@ -1892,18 +2436,24 @@ function openStatsModal(infId){
     inf.historial_estadisticas = inf.historial_estadisticas || [];
     inf.historial_estadisticas.push(entry);
     if(entry.pct_masculino!=null) inf.publico_masculino_pct = entry.pct_masculino;
+    if(!inf.pais && entry.pais_principal){
+      const matchPais = PAISES.find(p=>entry.pais_principal.toLowerCase().includes(p.toLowerCase()));
+      if(matchPais) inf.pais = matchPais;
+    }
     await saveData();
     overlay.remove();
     render();
   };
 }
 
-function exportCSV(){
-  const rows = [["Usuario IG","Categoría","% Masculino","Prioridad","Marca","Estado","Presupuesto","Pago final","Ganancia","Estado pago"]];
-  state.influencers.forEach(inf=>{
+function exportCSV(lista){
+  const influencersAExportar = lista || state.influencers;
+  const rows = [["Usuario IG","Categoría","% Masculino","Prioridad","Plataformas extra","Marca","Estado","Presupuesto","Pago final","Ganancia","Estado pago"]];
+  influencersAExportar.forEach(inf=>{
+    const plataformasExtra = (inf.redes||[]).map(r=>r.plataforma).join(', ');
     (inf.negociaciones&&inf.negociaciones.length? inf.negociaciones : [{}]).forEach(neg=>{
       const ganancia = (Number(neg.presupuesto_marca)||0)-(Number(neg.pago_final)||0);
-      rows.push([inf.usuario_ig, inf.categoria||'', inf.publico_masculino_pct||'', inf.prioridad||'', neg.marca||'', neg.estado||'', neg.presupuesto_marca||'', neg.pago_final||'', neg.estado?ganancia:'', neg.estado_pago||'']);
+      rows.push([inf.usuario_ig, inf.categoria||'', inf.publico_masculino_pct||'', inf.prioridad||'', plataformasExtra, neg.marca||'', neg.estado||'', neg.presupuesto_marca||'', neg.pago_final||'', neg.estado?ganancia:'', neg.estado_pago||'']);
     });
   });
   const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -2003,6 +2553,23 @@ function attachEvents(){
         });
       };
     });
+    ['cot-desde','cot-hasta'].forEach(id=>{
+      document.getElementById(id)?.addEventListener('change', ()=>{ document.getElementById('main').innerHTML = renderHerramientas(); attachEvents(); });
+    });
+    const calcular = ()=>{
+      const presupuesto = Number(document.getElementById('calc-presupuesto').value)||0;
+      const pago = Number(document.getElementById('calc-pago').value)||0;
+      document.getElementById('calc-resultado').innerHTML = `Ganancia: <span class="gain">${money(presupuesto-pago)}</span>`;
+    };
+    document.getElementById('calc-presupuesto')?.addEventListener('input', calcular);
+    document.getElementById('calc-pago')?.addEventListener('input', calcular);
+    document.getElementById('btn-guardar-notas')?.addEventListener('click', async ()=>{
+      state.notasGenerales = document.getElementById('notas-generales').value;
+      const status = document.getElementById('notas-status');
+      status.textContent = 'Guardando...';
+      await saveNotasGenerales();
+      status.innerHTML = '<span class="gain">Guardado ✓</span>';
+    });
   }
 
   if(state.view==='asistente'){
@@ -2045,6 +2612,7 @@ function attachEvents(){
 
   if(state.view==='dashboard'){
     document.getElementById('btn-new-from-dash')?.addEventListener('click', ()=>openInfluencerModal());
+    document.getElementById('btn-carga-rapida')?.addEventListener('click', ()=>openCargaRapidaModal());
     document.querySelectorAll('[data-goto]').forEach(el=>{
       el.onclick = ()=>{ state.detailId = el.dataset.goto; state.view='detail'; render(); };
     });
@@ -2069,8 +2637,8 @@ function attachEvents(){
   if(state.view==='pool'){
     document.getElementById('table-wrap').innerHTML = renderTable();
     document.getElementById('btn-new').onclick = ()=>openInfluencerModal();
-    document.getElementById('btn-export').onclick = exportCSV;
-    ['f-cat','f-estado','f-preca','f-search'].forEach(id=>{
+    document.getElementById('btn-export').onclick = ()=>exportCSV(state.ultimoFiltroPool);
+    ['f-cat','f-estado','f-preca','f-plataforma','f-search'].forEach(id=>{
       document.getElementById(id).addEventListener('input', ()=>{
         document.getElementById('table-wrap').innerHTML = renderTable();
         attachTableEvents();
@@ -2082,6 +2650,7 @@ function attachEvents(){
   if(state.view==='detail'){
     document.getElementById('back-to-pool').onclick = ()=>{ state.view='pool'; render(); };
     document.getElementById('btn-compartir').onclick = ()=>compartirConMichael(state.detailId);
+    document.getElementById('btn-imprimir').onclick = ()=>window.print();
     document.getElementById('btn-desc-michael').onclick = ()=>openDescMichaelModal(state.detailId);
     document.getElementById('btn-edit-profile').onclick = ()=>{
       const inf = state.influencers.find(i=>i.id===state.detailId);
@@ -2096,9 +2665,38 @@ function attachEvents(){
     };
     document.getElementById('btn-new-neg').onclick = ()=>openNegModal(state.detailId);
     document.getElementById('btn-new-contacto').onclick = ()=>openContactoModal(state.detailId);
+    document.getElementById('btn-new-red').onclick = ()=>openRedModal(state.detailId);
+    document.querySelectorAll('[data-edit-red]').forEach(el=>{
+      el.onclick = ()=>{
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const red = inf.redes.find(r=>r.id===el.dataset.editRed);
+        if(red) openRedModal(state.detailId, red);
+      };
+    });
+    document.querySelectorAll('[data-delete-red]').forEach(el=>{
+      el.onclick = async ()=>{
+        if(!confirm('¿Eliminar esta cuenta?')) return;
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        inf.redes = inf.redes.filter(r=>r.id!==el.dataset.deleteRed);
+        await saveData();
+        render();
+      };
+    });
     document.getElementById('btn-new-stats').onclick = ()=>openStatsModal(state.detailId);
     document.querySelectorAll('[data-new-reel]').forEach(btn=>{
       btn.onclick = ()=>openReelModal(state.detailId, btn.dataset.newReel);
+    });
+    document.querySelectorAll('[data-new-tramo]').forEach(btn=>{
+      btn.onclick = ()=>openTramoModal(state.detailId, btn.dataset.newTramo);
+    });
+    document.querySelectorAll('[data-edit-tramo]').forEach(el=>{
+      el.onclick = ()=>{
+        const [negId, tramoId] = el.dataset.editTramo.split('|');
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const neg = inf.negociaciones.find(n=>n.id===negId);
+        const tramo = neg.tramos.find(t=>t.id===tramoId);
+        openTramoModal(state.detailId, negId, tramo);
+      };
     });
     document.querySelectorAll('[data-edit-reel]').forEach(el=>{
       el.onclick = ()=>{
@@ -2119,6 +2717,22 @@ function attachEvents(){
     document.querySelectorAll('[data-msg-ia]').forEach(btn=>{
       btn.onclick = ()=>openMensajeIAModal(state.detailId, btn.dataset.msgIa);
     });
+    document.querySelectorAll('[data-duplicar-neg]').forEach(btn=>{
+      btn.onclick = async ()=>{
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const original = inf.negociaciones.find(n=>n.id===btn.dataset.duplicarNeg);
+        if(!original) return;
+        const copia = {
+          id:uid(), marca: original.marca, fecha: todayStr(), presupuesto_marca:'', oferta_inicial:'', pago_final:'',
+          estado:'Standby', motivo_rechazo:'', medio_pago: original.medio_pago, id_pago:'', estado_pago:'Pendiente',
+          num_reels: original.num_reels, modalidad_pago: original.modalidad_pago, reels:[], tramos:[], estado_historial:[], link_contrato:''
+        };
+        inf.negociaciones.push(copia);
+        await saveData();
+        render();
+        alert('Se creó una negociación nueva en Standby, con los mismos datos de base (marca, cantidad de reels, modalidad de pago). Completá los montos.');
+      };
+    });
     document.querySelectorAll('[data-delete-neg]').forEach(btn=>{
       btn.onclick = async ()=>{
         if(!confirm('¿Eliminar esta negociación?')) return;
@@ -2135,6 +2749,22 @@ function attachTableEvents(){
   document.querySelectorAll('[data-open]').forEach(row=>{
     row.onclick = ()=>{ state.detailId = row.dataset.open; state.view='detail'; render(); };
   });
+  state.poolSeleccionados = state.poolSeleccionados || new Set();
+  document.querySelectorAll('[data-seleccionar]').forEach(cb=>{
+    cb.onchange = ()=>{
+      const id = cb.dataset.seleccionar;
+      if(cb.checked) state.poolSeleccionados.add(id); else state.poolSeleccionados.delete(id);
+      document.getElementById('table-wrap').innerHTML = renderTable();
+      attachTableEvents();
+    };
+  });
+  document.getElementById('btn-limpiar-seleccion')?.addEventListener('click', ()=>{
+    state.poolSeleccionados.clear();
+    document.getElementById('table-wrap').innerHTML = renderTable();
+    attachTableEvents();
+  });
+  document.getElementById('btn-generar-lista')?.addEventListener('click', ()=>abrirGenerarListaModal());
+  document.getElementById('btn-comparar')?.addEventListener('click', ()=>abrirComparadorModal());
 }
 
 function renderLogin(mensaje){
@@ -2189,7 +2819,48 @@ async function iniciarApp(){
   }
 }
 
+function pedirPermisoNotificaciones(){
+  if('Notification' in window && Notification.permission==='default'){
+    Notification.requestPermission();
+  }
+}
+
+function notificarUrgente(titulo, cuerpo){
+  if('Notification' in window && Notification.permission==='granted'){
+    new Notification(titulo, {body: cuerpo});
+  }
+}
+
+function iniciarRecordatorioPausa(){
+  setInterval(()=>{
+    if(document.getElementById('pausa-banner')) return;
+    const banner = document.createElement('div');
+    banner.id = 'pausa-banner';
+    banner.style.cssText = 'position:fixed; bottom:20px; right:20px; max-width:300px; background:var(--surface); border:1px solid var(--gold-dim); border-radius:10px; padding:14px 16px; z-index:100; box-shadow:0 4px 20px rgba(0,0,0,0.4);';
+    banner.innerHTML = `
+      <div style="font-size:13px; margin-bottom:8px;">☕ Llevás un rato scrolleando Instagram. Cortá unos minutos — mucha actividad seguida puede disparar alguna verificación de seguridad.</div>
+      <button class="ghost" style="font-size:12px; padding:5px 10px;" id="pausa-cerrar">Entendido</button>
+    `;
+    document.body.appendChild(banner);
+    document.getElementById('pausa-cerrar').onclick = ()=>banner.remove();
+    notificarUrgente('Hora de una pausa', 'Llevás un rato en el CRM — cortá unos minutos.');
+  }, 27*60*1000);
+}
+
+function iniciarChequeoAlertasUrgentes(){
+  setInterval(()=>{
+    const alertas = getAlerts();
+    const videos = alertas.filter(a=>a.tipo==='video');
+    if(videos.length){
+      notificarUrgente('Reels por vencer', `${videos.length} reel(s) están por cumplir 15 días sin descargar.`);
+    }
+  }, 60*60*1000);
+}
+
 iniciarApp();
+pedirPermisoNotificaciones();
+iniciarChequeoAlertasUrgentes();
+iniciarRecordatorioPausa();
 </script>
 </body>
 </html>
