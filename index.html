@@ -148,6 +148,11 @@
   @keyframes spin{to{transform:rotate(360deg);}}
   .ia-note{font-size:11px; color:var(--text3); margin-top:4px;}
 
+  .help-icon{display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:50%; background:var(--surface2); border:1px solid var(--border); color:var(--text3); font-size:10px; cursor:pointer; margin-left:5px; vertical-align:middle; user-select:none;}
+  .help-icon:hover{border-color:var(--gold); color:var(--gold);}
+  .help-tooltip{display:none; position:fixed; background:var(--surface2); border:1px solid var(--gold-dim); border-radius:8px; padding:10px 12px; font-size:12px; color:var(--text2); max-width:260px; z-index:500; box-shadow:0 6px 20px rgba(0,0,0,0.5); line-height:1.5;}
+  .help-tooltip.show{display:block;}
+
   .chat-box{display:flex; flex-direction:column; gap:12px; max-height:60vh; overflow-y:auto; padding:4px 4px 12px; margin-bottom:14px;}
   .chat-bubble{max-width:80%; padding:10px 14px; border-radius:14px; font-size:13px; line-height:1.6; white-space:pre-wrap;}
   .chat-bubble.user{align-self:flex-end; background:var(--gold); color:#1a1608; border-bottom-right-radius:4px;}
@@ -185,6 +190,7 @@
     <button data-view="asistente">Asistente</button>
   </nav>
   <div class="header-actions">
+    <button class="primary" id="btn-ayuda-general">❓ Ayuda</button>
     <button class="ghost" id="btn-logout">Cerrar sesión</button>
     <button class="ghost" id="btn-config-nube">Nube: <span id="nube-status">sin conectar</span></button>
     <button class="ghost" id="btn-config-ia">IA: <span id="ia-status">sin configurar</span></button>
@@ -196,6 +202,29 @@
 <main id="main"></main>
 
 <script>
+function ayuda(texto){
+  return `<span class="help-icon" data-help="${texto.replace(/"/g,'&quot;')}">?</span>`;
+}
+
+document.addEventListener('click', (e)=>{
+  const existente = document.getElementById('help-tooltip-activo');
+  if(existente) existente.remove();
+  if(e.target.classList.contains('help-icon')){
+    const tip = document.createElement('div');
+    tip.id = 'help-tooltip-activo';
+    tip.className = 'help-tooltip show';
+    tip.textContent = e.target.dataset.help;
+    document.body.appendChild(tip);
+    const rect = e.target.getBoundingClientRect();
+    const tipWidth = 260;
+    let left = rect.left;
+    if(left + tipWidth > window.innerWidth - 10) left = window.innerWidth - tipWidth - 10;
+    tip.style.left = Math.max(10,left) + 'px';
+    tip.style.top = (rect.bottom + 6) + 'px';
+    e.stopPropagation();
+  }
+});
+
 const CATEGORIAS = ["Fútbol","Memes","Entretenimiento","Streamers","Otro"];
 const PAISES = ["Argentina","Perú","México","Colombia","Chile","Ecuador","Otro"];
 const PLATAFORMAS = ["Instagram","TikTok","YouTube","Facebook","Twitter/X","Kick","Twitch","Otra"];
@@ -472,6 +501,46 @@ async function refreshIAStatus(){
   const key = await getGeminiKey();
   const el = document.getElementById('ia-status');
   if(el) el.textContent = key ? 'configurada' : 'sin configurar';
+}
+
+function openAyudaGeneralModal(){
+  const secciones = [
+    {t:'Dashboard', d:'Tu pantalla de entrada. Resumen de todo (cuánto ganaste, cuántos aprobados, cartera disponible), las alertas que el sistema detecta solo, el resumen semanal con IA, y los botones para cargar un influencer nuevo.'},
+    {t:'Pool', d:'La tabla completa de tus influencers. Buscás, filtrás por categoría/estado/precalificación/plataforma, seleccionás varios para generar la lista de Michael o compararlos, y exportás a Excel.'},
+    {t:'Ficha del influencer', d:'Al tocar uno del Pool, entrás acá: sus datos, sus otras cuentas/redes, su historial de contacto, sus estadísticas de audiencia, y todas sus negociaciones con las distintas marcas.'},
+    {t:'Negociación', d:'Cada trato con una marca puntual (1xBet, Betano, etc.) para un influencer. Tiene su presupuesto, su pago, sus reels, sus tramos de pago de Michael, y su propio estado (Standby/Aprobado/Rechazado/En Campaña).'},
+    {t:'Reels', d:'Dentro de cada negociación, cada video que sube el influencer. Se verifican con IA (logo, código promocional, contenido problemático), se les carga el link, y se marcan como comprimidos una vez procesados.'},
+    {t:'Tramos de pago', d:'Cuando Michael paga en varias partes (no todo junto), cada parte es un tramo — con su monto y su estado (Pendiente/Pedido/Recibido).'},
+    {t:'Portfolio', d:'Se llena solo con las campañas que ya tienen reels con video guardado. Ahí generás casos de éxito con IA para mostrarle a otras agencias.'},
+    {t:'Mensajes', d:'Tus plantillas de WhatsApp/Telegram, editables. Usás [MONTO], [MEDIO], [MOTIVO] como marcadores para completar antes de enviar.'},
+    {t:'Herramientas', d:'Los buscadores pagos (Modash, etc.), la guía de búsqueda por nichos, el gráfico de ganancia mensual, la vista por marca, la calculadora rápida, los próximos reels esperados, tus notas internas, y el análisis de cotización.'},
+    {t:'Asistente', d:'Un chat con IA que se acuerda de la conversación — le podés preguntar cosas de tu negocio, pedirle redacciones o ideas.'},
+    {t:'Precalificación', d:'Se calcula sola: si el influencer tiene 100.000+ seguidores y su reel más flojo tiene 50.000+ vistas, queda Precalificado. Si no llega a alguno, Descartado.'},
+    {t:'Cartera disponible', d:'Los influencers Precalificados que no tienen ninguna negociación activa ahora — tu reserva lista para ofrecer cuando te pidan un perfil.'},
+    {t:'Botón "IA" (arriba)', d:'Ahí configurás tu clave gratuita de Gemini, necesaria para que funcionen los botones que dicen "con IA" en todo el sistema.'},
+    {t:'Botón "Nube" (arriba)', d:'Te dice si tus datos están sincronizados con la base de datos o si estás sin conexión (guardando solo en este dispositivo por ahora).'},
+    {t:'Backup / Restaurar', d:'Backup baja un archivo de respaldo de todo. Restaurar sube uno viejo — ojo, reemplaza todo lo que tengas cargado en ese momento.'}
+  ];
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:600px">
+      <h2>Ayuda — cómo funciona cada parte <span class="close" id="modal-close">×</span></h2>
+      <p class="muted" style="margin-bottom:14px">Además de esto, cada campo de los formularios tiene su propio ícono <span class="help-icon">?</span> — tocalo para ver qué significa puntualmente.</p>
+      ${secciones.map(s=>`
+        <div class="msg-card">
+          <div class="msg-top"><strong>${s.t}</strong></div>
+          <p>${s.d}</p>
+        </div>
+      `).join('')}
+      <div class="modal-actions">
+        <button class="primary" id="modal-cancel">Cerrar</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
 }
 
 function openConfigNubeModal(){
@@ -1581,22 +1650,22 @@ function openInfluencerModal(existing){
         </div>
       </div>
       <div class="grid2">
-        <div class="field"><label>Usuario de Instagram</label><input id="m-usuario" value="${inf.usuario_ig}" placeholder="@usuario"></div>
-        <div class="field"><label>Link de Instagram</label><input id="m-link" value="${inf.link_ig}" placeholder="https://instagram.com/..."></div>
-        <div class="field"><label>WhatsApp / Contacto</label><input id="m-contacto" value="${inf.contacto}"></div>
-        <div class="field"><label>País</label>
+        <div class="field"><label>Usuario de Instagram ${ayuda('El @ con el que lo identificás en el sistema. Es el dato obligatorio, todo lo demás es opcional.')}</label><input id="m-usuario" value="${inf.usuario_ig}" placeholder="@usuario"></div>
+        <div class="field"><label>Link de Instagram ${ayuda('El link a su perfil. Si lo pegás acá, el sistema completa el usuario solo (si ese campo está vacío).')}</label><input id="m-link" value="${inf.link_ig}" placeholder="https://instagram.com/..."></div>
+        <div class="field"><label>WhatsApp / Contacto ${ayuda('Su número o forma de contacto directo, para escribirle vos.')}</label><input id="m-contacto" value="${inf.contacto}"></div>
+        <div class="field"><label>País ${ayuda('País del influencer. Si más adelante subís una captura de estadísticas y este campo está vacío, el sistema lo completa solo con el país principal de su audiencia.')}</label>
           <select id="m-pais">
             <option value="">Seleccionar...</option>
             ${PAISES.map(p=>`<option ${inf.pais===p?'selected':''}>${p}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Cómo lo encontré</label>
+        <div class="field"><label>Cómo lo encontré ${ayuda('De dónde salió este candidato: búsqueda directa, cuentas sugeridas de Instagram, comentarios, etc. Es solo para tu propio registro.')}</label>
           <select id="m-fuente">
             <option value="">Seleccionar...</option>
             ${FUENTES.map(f=>`<option ${inf.fuente_captacion===f?'selected':''}>${f}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Riesgo</label>
+        <div class="field"><label>Riesgo ${ayuda('Campo libre tuyo — no lo calcula el sistema. Anotá acá si el influencer te da mala espina por algo (entrega tarde, es conflictivo, etc.) para acordarte después.')}</label>
           <select id="m-riesgo">
             <option value="">Sin evaluar</option>
             <option ${inf.riesgo==='Bajo'?'selected':''}>Bajo</option>
@@ -1604,8 +1673,8 @@ function openInfluencerModal(existing){
             <option ${inf.riesgo==='Alto'?'selected':''}>Alto</option>
           </select>
         </div>
-        <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer; margin-top:22px;"><input type="checkbox" id="m-favorito" style="width:auto" ${inf.favorito?'checked':''}> ⭐ Favorito</label></div>
-        <div class="field"><label>Categoría</label>
+        <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer; margin-top:22px;"><input type="checkbox" id="m-favorito" style="width:auto" ${inf.favorito?'checked':''}> ⭐ Favorito ${ayuda('Lo marca como acceso rápido en el sistema — no afecta ningún cálculo, es solo para encontrarlo más fácil.')}</label></div>
+        <div class="field"><label>Categoría ${ayuda('El rubro de contenido que hace (fútbol, memes, gaming, etc.). Podés usar el botón de abajo para que la IA te la sugiera mirando una captura de su perfil.')}</label>
           <select id="m-categoria">
             <option value="">Seleccionar...</option>
             ${CATEGORIAS.map(c=>`<option ${inf.categoria===c?'selected':''}>${c}</option>`).join('')}
@@ -1616,26 +1685,32 @@ function openInfluencerModal(existing){
             <div id="m-cat-status" class="ia-note"></div>
           </div>
         </div>
-        <div class="field"><label>Público masculino (%)</label><input id="m-pct" type="number" min="0" max="100" value="${inf.publico_masculino_pct}"></div>
-        <div class="field"><label>Seguidores</label><input id="m-seguidores" type="number" value="${inf.seguidores}" placeholder="ej: 150000"></div>
-        <div class="field"><label>Vista mínima de reel (el más bajo)</label><input id="m-vistamin" type="number" value="${inf.vista_reel_min}" placeholder="ej: 45000">
+        <div class="field"><label>Público masculino (%) ${ayuda('Porcentaje de su audiencia que es hombre. La marca exige mínimo 60%. Subí una captura de estadísticas abajo para completarlo solo.')}</label><input id="m-pct" type="number" min="0" max="100" value="${inf.publico_masculino_pct}">
+          <div style="margin-top:8px;">
+            <input type="file" id="m-stats-file" accept="image/*" style="font-size:11px">
+            <button class="ghost" id="m-stats-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer estadísticas con IA</button>
+            <div id="m-stats-status" class="ia-note"></div>
+          </div>
+        </div>
+        <div class="field"><label>Seguidores ${ayuda('Cantidad total de seguidores de la cuenta. Junto con la vista mínima, define si el perfil queda Precalificado (necesita 100.000 o más).')}</label><input id="m-seguidores" type="number" value="${inf.seguidores}" placeholder="ej: 150000"></div>
+        <div class="field"><label>Vista mínima de reel (el más bajo) ${ayuda('De sus últimos reels, el que tuvo MENOS vistas (no el promedio). Sirve para detectar cuentas con seguidores comprados. Necesita 50.000 o más para Precalificar.')}</label><input id="m-vistamin" type="number" value="${inf.vista_reel_min}" placeholder="ej: 45000">
           <div style="margin-top:8px;">
             <input type="file" id="m-datos-file" accept="image/*" style="font-size:11px">
             <button class="ghost" id="m-datos-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer con IA</button>
             <div id="m-datos-status" class="ia-note"></div>
           </div>
         </div>
-        <div class="field"><label>Prioridad</label>
+        <div class="field"><label>Prioridad ${ayuda('Qué tan urgente es contactarlo o hacerle seguimiento. Es solo para ordenarte vos, no afecta ningún cálculo del sistema.')}</label>
           <select id="m-prioridad">
             <option ${inf.prioridad==='Alta'?'selected':''}>Alta</option>
             <option ${inf.prioridad==='Media'?'selected':''}>Media</option>
             <option ${inf.prioridad==='Baja'?'selected':''}>Baja</option>
           </select>
         </div>
-        <div class="field"><label>Cooldown hasta (otra marca)</label><input id="m-cooldown" type="date" value="${inf.cooldown_hasta}"></div>
-        <div class="field"><label>Etiquetas (separadas por coma)</label><input id="m-etiquetas" value="${(inf.etiquetas||[]).join(', ')}" placeholder="apto belleza, apto gaming..."></div>
-        <div class="field"><label>Código promocional</label><input id="m-promo" value="${inf.codigo_promocional||''}" placeholder="ej: LEYVA100"></div>
-        <div class="field"><label>Link del logo a usar</label><input id="m-logo" value="${inf.logo_link||''}" placeholder="link que te pasó Michael"></div>
+        <div class="field"><label>Cooldown hasta (otra marca) ${ayuda('Fecha hasta la que este influencer NO se puede ofrecer a una marca competidora (por ejemplo, si ya lo usaste con 1xBet). Dejalo vacío si no aplica. Cuando vence, el sistema te avisa que lo podés reofrecer.')}</label><input id="m-cooldown" type="date" value="${inf.cooldown_hasta}"></div>
+        <div class="field"><label>Etiquetas (separadas por coma) ${ayuda('Texto libre, opcional. Sirve para anotar a qué otros rubros podría servir este influencer en el futuro, aparte de apuestas (ej: "apto belleza, apto gaming").')}</label><input id="m-etiquetas" value="${(inf.etiquetas||[]).join(', ')}" placeholder="apto belleza, apto gaming..."></div>
+        <div class="field"><label>Código promocional ${ayuda('El código único que este influencer usa en sus videos. Es fijo para él, no cambia por campaña.')}</label><input id="m-promo" value="${inf.codigo_promocional||''}" placeholder="ej: LEYVA100"></div>
+        <div class="field"><label>Link del logo a usar ${ayuda('El logo de la marca que Michael te pasa para que el influencer lo pegue en el video. También es fijo por influencer.')}</label><input id="m-logo" value="${inf.logo_link||''}" placeholder="link que te pasó Michael"></div>
       </div>
       <div class="modal-actions">
         <button class="ghost" id="modal-cancel">Cancelar</button>
@@ -1750,6 +1825,48 @@ function openInfluencerModal(existing){
     btn.disabled = false;
   };
 
+  let statsBase64 = null, statsMediaType = null, statsArchivo = null;
+  let statsPendiente = null;
+  document.getElementById('m-stats-file').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    statsArchivo = file;
+    statsMediaType = file.type;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      statsBase64 = reader.result.split(',')[1];
+      document.getElementById('m-stats-leer').disabled = false;
+    };
+    reader.readAsDataURL(file);
+  };
+  document.getElementById('m-stats-leer').onclick = async ()=>{
+    if(!statsBase64) return;
+    const btn = document.getElementById('m-stats-leer');
+    const status = document.getElementById('m-stats-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo...`;
+    const prompt = "Esta es una captura de pantalla de las estadísticas de audiencia de Instagram de un influencer (género, edad, país). Extraé exactamente estos datos y respondé SOLO con un JSON válido, sin texto adicional, sin markdown, con este formato exacto: {\"pct_masculino\": <número entero 0-100 o null si no se ve>, \"pct_femenino\": <número entero 0-100 o null>, \"pais_principal\": \"<nombre del país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
+    try{
+      const texto = await llamarGemini(prompt, statsBase64, statsMediaType);
+      const clean = texto.replace(/```json|```/g,'').trim();
+      const parsed = JSON.parse(clean);
+      if(parsed.pct_masculino!=null) document.getElementById('m-pct').value = parsed.pct_masculino;
+      if(parsed.pais_principal && !document.getElementById('m-pais').value){
+        const matchPais = PAISES.find(p=>parsed.pais_principal.toLowerCase().includes(p.toLowerCase()));
+        if(matchPais) document.getElementById('m-pais').value = matchPais;
+      }
+      statsPendiente = { id:uid(), fecha: todayStr(), pct_masculino: parsed.pct_masculino, pct_femenino: parsed.pct_femenino, pais_principal: parsed.pais_principal||'', rango_edad_principal: parsed.rango_edad_principal||'', captura_url: null };
+      status.innerHTML = `<span class="gain">Listo — se va a guardar en el historial al guardar el influencer.</span>`;
+    }catch(err){
+      if(err.message==='SIN_CLAVE'){
+        status.innerHTML = 'Configurá la IA primero.';
+      }else{
+        status.innerHTML = `<span class="pct-bad">Error: ${err.message}</span>`;
+      }
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
@@ -1770,6 +1887,22 @@ function openInfluencerModal(existing){
           status.innerHTML = `<span class="pct-bad">No se pudo subir la foto.</span>`;
         }
       }
+    }
+    if(statsPendiente){
+      const supa = getSupabaseClient();
+      if(supa && statsArchivo){
+        try{
+          const path = `${inf.id}/${Date.now()}_${statsArchivo.name}`;
+          const { error } = await supa.storage.from('capturas').upload(path, statsArchivo);
+          if(!error){
+            const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path);
+            statsPendiente.captura_url = urlData.publicUrl;
+          }
+        }catch(err){ console.error('Error subiendo captura de estadísticas', err); }
+      }
+      inf.historial_estadisticas = inf.historial_estadisticas || [];
+      inf.historial_estadisticas.push(statsPendiente);
+      if(statsPendiente.pct_masculino!=null) inf.publico_masculino_pct = statsPendiente.pct_masculino;
     }
     const usuarioNorm = inf.usuario_ig.toLowerCase().replace('@','').trim();
     const linkNorm = document.getElementById('m-link').value.trim().toLowerCase().replace(/\/$/,'');
@@ -1812,46 +1945,46 @@ function openNegModal(infId, existingNeg){
     <div class="modal">
       <h2>${existingNeg?'Editar negociación':'Nueva negociación'} <span class="close" id="modal-close">×</span></h2>
       <div class="grid2">
-        <div class="field"><label>Marca</label><input id="n-marca" value="${neg.marca}" placeholder="1xBet, Betano..."></div>
-        <div class="field"><label>Cuenta para esta campaña</label>
+        <div class="field"><label>Marca ${ayuda('La casa de apuestas para esta campaña puntual (1xBet, Betano, etc.). Un mismo influencer puede tener varias negociaciones, una por marca.')}</label><input id="n-marca" value="${neg.marca}" placeholder="1xBet, Betano..."></div>
+        <div class="field"><label>Cuenta para esta campaña ${ayuda('Si el influencer tiene varias cuentas (TikTok, otra de Instagram, etc.), elegís acá con cuál se hace esta campaña puntual.')}</label>
           <select id="n-cuenta">
             <option value="principal" ${(!neg.cuenta_id||neg.cuenta_id==='principal')?'selected':''}>${inf.usuario_ig} (principal, Instagram)</option>
             ${(inf.redes||[]).map(r=>`<option value="${r.id}" ${neg.cuenta_id===r.id?'selected':''}>${r.usuario||r.link} (${r.plataforma})</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Fecha</label><input id="n-fecha" type="date" value="${neg.fecha}"></div>
-        <div class="field"><label>Presupuesto de la marca ($)</label><input id="n-presupuesto" type="number" value="${neg.presupuesto_marca}"></div>
-        <div class="field"><label>Oferta inicial al influencer ($)</label><input id="n-oferta" type="number" value="${neg.oferta_inicial}">
+        <div class="field"><label>Fecha ${ayuda('Fecha en que arrancó esta negociación.')}</label><input id="n-fecha" type="date" value="${neg.fecha}"></div>
+        <div class="field"><label>Presupuesto de la marca ($) ${ayuda('Lo que Michael te aprobó como máximo para pagarle al influencer en esta campaña.')}</label><input id="n-presupuesto" type="number" value="${neg.presupuesto_marca}"></div>
+        <div class="field"><label>Oferta inicial al influencer ($) ${ayuda('Lo primero que le ofrecés al influencer, antes de negociar. Puede ser menor al presupuesto de la marca — la diferencia es tu ganancia.')}</label><input id="n-oferta" type="number" value="${neg.oferta_inicial}">
           <div id="n-oferta-sugerida" class="ia-note"></div>
         </div>
-        <div class="field"><label>Pago final acordado ($)</label><input id="n-pago" type="number" value="${neg.pago_final}"></div>
-        <div class="field"><label>Estado (Michael)</label>
+        <div class="field"><label>Pago final acordado ($) ${ayuda('El monto en el que terminaron cerrando el trato con el influencer, después de negociar.')}</label><input id="n-pago" type="number" value="${neg.pago_final}"></div>
+        <div class="field"><label>Estado (Michael) ${ayuda('Standby: esperando que Michael decida. Aprobado: Michael lo eligió. Rechazado: no lo quiso. En Campaña: ya está subiendo reels.')}</label>
           <select id="n-estado">
             ${ESTADOS.map(e=>`<option ${neg.estado===e?'selected':''}>${e}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Cantidad de reels acordados</label><input id="n-numreels" type="number" min="1" value="${neg.num_reels||5}"></div>
-        <div class="field"><label>Modalidad de pago</label>
+        <div class="field"><label>Cantidad de reels acordados ${ayuda('Cuántos reels tiene que subir el influencer en esta campaña. Normalmente 5, a veces 3 o 4.')}</label><input id="n-numreels" type="number" min="1" value="${neg.num_reels||5}"></div>
+        <div class="field"><label>Modalidad de pago ${ayuda('Cómo le pagás al influencer: la mitad al primer reel y la otra mitad al último, o un monto por cada reel que suba.')}</label>
           <select id="n-modalidad">
             <option value="50/50" ${neg.modalidad_pago==='50/50'?'selected':''}>50% al 1° reel, 50% al último</option>
             <option value="por_reel" ${neg.modalidad_pago==='por_reel'?'selected':''}>Por cada reel subido</option>
           </select>
         </div>
-        <div class="field"><label>Medio de pago</label>
+        <div class="field"><label>Medio de pago ${ayuda('Cómo le vas a pagar al influencer (Binance, transferencia, etc.).')}</label>
           <select id="n-medio">
             <option value="">Seleccionar...</option>
             ${MEDIOS_PAGO.map(m=>`<option ${neg.medio_pago===m?'selected':''}>${m}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>ID de pago / billetera</label><input id="n-idpago" value="${neg.id_pago}"></div>
-        <div class="field"><label>Estado de pago</label>
+        <div class="field"><label>ID de pago / billetera ${ayuda('El número de cuenta, ID de Binance o billetera del influencer, para no tener que buscarlo de nuevo cada vez que le pagás.')}</label><input id="n-idpago" value="${neg.id_pago}"></div>
+        <div class="field"><label>Estado de pago ${ayuda('Pendiente: todavía no le pagaste nada. Enviado: ya mandaste el pago. Confirmado: el influencer confirmó que le llegó.')}</label>
           <select id="n-estadopago">
             ${ESTADOS_PAGO.map(e=>`<option ${neg.estado_pago===e?'selected':''}>${e}</option>`).join('')}
           </select>
         </div>
-        <div class="field"><label>Link del contrato/acuerdo (opcional)</label><input id="n-contrato" value="${neg.link_contrato||''}" placeholder="link a Drive, PDF, etc."></div>
+        <div class="field"><label>Link del contrato/acuerdo (opcional) ${ayuda('Si usás algún documento o acuerdo escrito con el influencer, pegás el link acá.')}</label><input id="n-contrato" value="${neg.link_contrato||''}" placeholder="link a Drive, PDF, etc."></div>
       </div>
-      <div class="field"><label>Motivo de rechazo (opcional)</label><textarea id="n-motivo" rows="2">${neg.motivo_rechazo||''}</textarea>
+      <div class="field"><label>Motivo de rechazo (opcional) ${ayuda('Por qué Michael no aprobó este perfil. Te sirve para no volver a ofrecerlo por el mismo motivo, o para explicarle al influencer.')}</label><textarea id="n-motivo" rows="2">${neg.motivo_rechazo||''}</textarea>
         <button class="ghost" id="n-motivo-mejorar" style="font-size:11px; padding:5px 10px; margin-top:6px">Redactar profesional con IA</button>
       </div>
       <div class="modal-actions">
@@ -1927,8 +2060,8 @@ function openTramoModal(infId, negId, existingTramo){
   overlay.innerHTML = `
     <div class="modal" style="max-width:420px">
       <h2>${existingTramo?'Editar tramo':'Nuevo tramo'} <span class="close" id="modal-close">×</span></h2>
-      <div class="field"><label>Monto de este tramo ($)</label><input id="tr-monto" type="number" value="${t.monto}"></div>
-      <div class="field"><label>Estado</label>
+      <div class="field"><label>Monto de este tramo ($) ${ayuda('Cuánto es este pago puntual. Si Michael paga todo junto, cargá un solo tramo por el total.')}</label><input id="tr-monto" type="number" value="${t.monto}"></div>
+      <div class="field"><label>Estado ${ayuda('Pendiente: todavía no se lo pediste a Michael. Pedido: ya se lo reclamaste. Recibido: ya te llegó.')}</label>
         <select id="tr-estado">
           <option ${t.estado==='Pendiente'?'selected':''}>Pendiente</option>
           <option ${t.estado==='Pedido'?'selected':''}>Pedido</option>
@@ -1979,24 +2112,24 @@ function openReelModal(infId, negId, existingReel){
     <div class="modal" style="max-width:480px">
       <h2>${existingReel?'Editar reel':'Nuevo reel'} <span class="close" id="modal-close">×</span></h2>
       <div class="grid2">
-        <div class="field"><label>N° de reel</label><input id="r-numero" type="number" min="1" value="${reel.numero}"></div>
-        <div class="field"><label>Fecha de publicación</label><input id="r-fecha" type="date" value="${reel.fecha_publicacion}"></div>
-        <div class="field"><label>Plataforma</label>
+        <div class="field"><label>N° de reel ${ayuda('El número de reel dentro de esta campaña (1, 2, 3...). Se completa solo, pero lo podés cambiar.')}</label><input id="r-numero" type="number" min="1" value="${reel.numero}"></div>
+        <div class="field"><label>Fecha de publicación ${ayuda('Cuándo lo subió el influencer. Es la fecha que usa el sistema para calcular la alerta de los 15 días antes de que Instagram lo borre.')}</label><input id="r-fecha" type="date" value="${reel.fecha_publicacion}"></div>
+        <div class="field"><label>Plataforma ${ayuda('En qué red se publicó este reel puntual — a veces la campaña se hace en Instagram, otras veces en TikTok.')}</label>
           <select id="r-plataforma">
             ${PLATAFORMAS.map(p=>`<option ${(reel.plataforma||'Instagram')===p?'selected':''}>${p}</option>`).join('')}
           </select>
         </div>
       </div>
-      <div class="field"><label>Link del reel</label><input id="r-link" value="${reel.link_reel}"></div>
-      <div class="field"><label>Link del video descargado (Drive, etc.)</label><input id="r-video" value="${reel.link_video_descargado}"></div>
-      <div class="field"><label>Monto pagado por este reel ($, opcional)</label><input id="r-monto" type="number" value="${reel.monto_pagado}">
+      <div class="field"><label>Link del reel ${ayuda('El link directo al posteo. Es lo que le mandás a Michael como prueba de que se subió.')}</label><input id="r-link" value="${reel.link_reel}"></div>
+      <div class="field"><label>Link del video descargado (Drive, etc.) ${ayuda('Una vez que descargás el MP4 (antes de los 15 días), lo subís a Drive o donde uses, y pegás el link acá — así no perdés la evidencia cuando Instagram lo borre.')}</label><input id="r-video" value="${reel.link_video_descargado}"></div>
+      <div class="field"><label>Monto pagado por este reel ($, opcional) ${ayuda('Si le pagás al influencer por tramos ligados a cada reel, anotás acá cuánto le tocó por este puntual.')}</label><input id="r-monto" type="number" value="${reel.monto_pagado}">
         <div style="margin-top:8px;">
           <input type="file" id="r-comp-file" accept="image/*" style="font-size:11px">
           <button class="ghost" id="r-comp-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer comprobante con IA</button>
           <div id="r-comp-status" class="ia-note"></div>
         </div>
       </div>
-      <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="r-comprimido" style="width:auto" ${reel.comprimido?'checked':''}> Ya lo comprimí y archivé</label></div>
+      <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="r-comprimido" style="width:auto" ${reel.comprimido?'checked':''}> Ya lo comprimí y archivé ${ayuda('Marcalo cuando ya bajaste de peso el video y lo guardaste definitivo — así el sistema deja de recordarte que lo proceses (alerta de los 30 días).')}</label></div>
       <div class="field">
         <label>Verificar logo y código promocional (captura del reel, opcional)</label>
         <input type="file" id="r-verif-file" accept="image/*">
@@ -2523,6 +2656,7 @@ function attachEvents(){
   refreshNubeStatus();
 
   document.getElementById('btn-logout').onclick = cerrarSesion;
+  document.getElementById('btn-ayuda-general').onclick = openAyudaGeneralModal;
   document.getElementById('btn-config-nube').onclick = openConfigNubeModal;
   document.getElementById('btn-config-ia').onclick = openConfigIAModal;
   document.getElementById('btn-backup').onclick = downloadBackup;
