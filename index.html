@@ -191,6 +191,7 @@
   </nav>
   <div class="header-actions">
     <button class="primary" id="btn-ayuda-general">❓ Ayuda</button>
+    <button class="ghost" id="btn-cambiar-pass">Cambiar contraseña</button>
     <button class="ghost" id="btn-logout">Cerrar sesión</button>
     <button class="ghost" id="btn-config-nube">Nube: <span id="nube-status">sin conectar</span></button>
     <button class="ghost" id="btn-config-ia">IA: <span id="ia-status">sin configurar</span></button>
@@ -501,6 +502,37 @@ async function refreshIAStatus(){
   const key = await getGeminiKey();
   const el = document.getElementById('ia-status');
   if(el) el.textContent = key ? 'configurada' : 'sin configurar';
+}
+
+function openCambiarPasswordModal(){
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:380px">
+      <h2>Cambiar contraseña <span class="close" id="modal-close">×</span></h2>
+      <div class="field"><label>Nueva contraseña</label><input id="cp-pass1" type="password"></div>
+      <div class="field"><label>Repetila</label><input id="cp-pass2" type="password"></div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="cp-guardar">Guardar</button>
+      </div>
+      <div id="cp-status" class="ia-note" style="margin-top:8px"></div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('cp-guardar').onclick = async ()=>{
+    const p1 = document.getElementById('cp-pass1').value;
+    const p2 = document.getElementById('cp-pass2').value;
+    const status = document.getElementById('cp-status');
+    if(!p1 || p1.length<6){ status.innerHTML = '<span class="pct-bad">Mínimo 6 caracteres</span>'; return; }
+    if(p1!==p2){ status.innerHTML = '<span class="pct-bad">No coinciden</span>'; return; }
+    status.innerHTML = `<span class="spinner"></span>Guardando...`;
+    const supa = getSupabaseClient();
+    const { error } = await supa.auth.updateUser({ password: p1 });
+    status.innerHTML = error ? `<span class="pct-bad">${error.message}</span>` : '<span class="gain">Contraseña actualizada ✓</span>';
+  };
 }
 
 function openAyudaGeneralModal(){
@@ -2657,6 +2689,7 @@ function attachEvents(){
 
   document.getElementById('btn-logout').onclick = cerrarSesion;
   document.getElementById('btn-ayuda-general').onclick = openAyudaGeneralModal;
+  document.getElementById('btn-cambiar-pass').onclick = openCambiarPasswordModal;
   document.getElementById('btn-config-nube').onclick = openConfigNubeModal;
   document.getElementById('btn-config-ia').onclick = openConfigIAModal;
   document.getElementById('btn-backup').onclick = downloadBackup;
@@ -2960,6 +2993,7 @@ function renderLogin(mensaje){
       <div class="field" style="text-align:left"><label>Email</label><input id="login-email" type="email"></div>
       <div class="field" style="text-align:left"><label>Contraseña</label><input id="login-pass" type="password"></div>
       <button class="primary" id="login-btn" style="width:100%; margin-top:10px;">Entrar</button>
+      <p style="margin-top:14px;"><span style="color:var(--gold); cursor:pointer; text-decoration:underline; font-size:13px;" id="link-olvide">¿Olvidaste tu contraseña?</span></p>
       <div id="login-status" class="ia-note" style="margin-top:12px"></div>
     </div>
   `;
@@ -2982,6 +3016,66 @@ function renderLogin(mensaje){
   };
   document.getElementById('login-btn').onclick = intentar;
   document.getElementById('login-pass').addEventListener('keydown', e=>{ if(e.key==='Enter') intentar(); });
+  document.getElementById('link-olvide').onclick = ()=>renderOlvideContrasena();
+}
+
+function renderOlvideContrasena(){
+  document.getElementById('main').innerHTML = `
+    <div style="max-width:360px; margin:80px auto; text-align:center;">
+      <h2 style="margin-bottom:20px;">Recuperar contraseña</h2>
+      <p class="muted" style="margin-bottom:14px">Te mandamos un link a tu correo para que pongas una nueva.</p>
+      <div class="field" style="text-align:left"><label>Email</label><input id="olvide-email" type="email"></div>
+      <button class="primary" id="olvide-btn" style="width:100%; margin-top:10px;">Enviar link</button>
+      <p style="margin-top:14px;"><span style="color:var(--gold); cursor:pointer; text-decoration:underline; font-size:13px;" id="link-volver">Volver a iniciar sesión</span></p>
+      <div id="olvide-status" class="ia-note" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.getElementById('link-volver').onclick = ()=>renderLogin();
+  document.getElementById('olvide-btn').onclick = async ()=>{
+    const email = document.getElementById('olvide-email').value.trim();
+    const status = document.getElementById('olvide-status');
+    if(!email){ status.innerHTML = '<span class="pct-bad">Falta el email</span>'; return; }
+    status.innerHTML = `<span class="spinner"></span>Enviando...`;
+    const supa = getSupabaseClient();
+    const { error } = await supa.auth.resetPasswordForEmail(email, { redirectTo: window.location.href.split('#')[0] });
+    if(error){
+      status.innerHTML = `<span class="pct-bad">${error.message}</span>`;
+    }else{
+      status.innerHTML = '<span class="gain">Listo — revisá tu correo (y la carpeta de spam) y tocá el link que te mandamos.</span>';
+    }
+  };
+}
+
+function renderNuevaContrasena(){
+  document.getElementById('main').innerHTML = `
+    <div style="max-width:360px; margin:80px auto; text-align:center;">
+      <h2 style="margin-bottom:20px;">Poné tu nueva contraseña</h2>
+      <div class="field" style="text-align:left"><label>Nueva contraseña</label><input id="nueva-pass" type="password"></div>
+      <div class="field" style="text-align:left"><label>Repetila</label><input id="nueva-pass2" type="password"></div>
+      <button class="primary" id="nueva-btn" style="width:100%; margin-top:10px;">Guardar</button>
+      <div id="nueva-status" class="ia-note" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.querySelector('nav').style.display = 'none';
+  document.querySelector('.header-actions').style.display = 'none';
+  document.getElementById('nueva-btn').onclick = async ()=>{
+    const p1 = document.getElementById('nueva-pass').value;
+    const p2 = document.getElementById('nueva-pass2').value;
+    const status = document.getElementById('nueva-status');
+    if(!p1 || p1.length<6){ status.innerHTML = '<span class="pct-bad">Mínimo 6 caracteres</span>'; return; }
+    if(p1!==p2){ status.innerHTML = '<span class="pct-bad">No coinciden</span>'; return; }
+    status.innerHTML = `<span class="spinner"></span>Guardando...`;
+    const supa = getSupabaseClient();
+    const { error } = await supa.auth.updateUser({ password: p1 });
+    if(error){
+      status.innerHTML = `<span class="pct-bad">${error.message}</span>`;
+    }else{
+      status.innerHTML = '<span class="gain">Contraseña actualizada ✓ — entrando...</span>';
+      document.querySelector('nav').style.display = '';
+      document.querySelector('.header-actions').style.display = '';
+      setTimeout(()=>loadData(), 1200);
+    }
+  };
 }
 
 async function cerrarSesion(){
@@ -2996,6 +3090,15 @@ async function iniciarApp(){
     await loadData();
     return;
   }
+  let esRecuperacion = false;
+  supa.auth.onAuthStateChange((event)=>{
+    if(event==='PASSWORD_RECOVERY'){
+      esRecuperacion = true;
+      renderNuevaContrasena();
+    }
+  });
+  await new Promise(r=>setTimeout(r,300));
+  if(esRecuperacion) return;
   const { data } = await supa.auth.getSession();
   if(data && data.session){
     await loadData();
