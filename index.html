@@ -925,7 +925,7 @@ function renderTable(){
     <div class="table-scroll">
     <table>
       <thead><tr>
-        <th></th><th>Usuario IG</th><th>Categoría</th><th>% Masculino</th><th>Precalificación</th><th>Prioridad</th><th>Último estado</th><th>Marca</th>
+        <th></th><th></th><th>Usuario IG</th><th>Categoría</th><th>% Masculino</th><th>Precalificación</th><th>Prioridad</th><th>Último estado</th><th>Marca</th>
       </tr></thead>
       <tbody>
         ${rows.map(inf=>{
@@ -937,6 +937,7 @@ function renderTable(){
           const marcado = state.poolSeleccionados && state.poolSeleccionados.has(inf.id);
           return `<tr class="row-click" data-open="${inf.id}">
             <td style="width:30px" onclick="event.stopPropagation()"><input type="checkbox" data-seleccionar="${inf.id}" ${marcado?'checked':''} style="width:auto"></td>
+            <td style="width:36px">${inf.foto_url ? `<img src="${inf.foto_url}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;">` : `<span style="display:inline-block; width:28px; height:28px; border-radius:50%; background:var(--surface2); text-align:center; line-height:28px; font-size:11px; color:var(--text3);">${(inf.usuario_ig||'?').replace('@','').charAt(0).toUpperCase()}</span>`}</td>
             <td>${inf.usuario_ig}</td>
             <td>${inf.categoria||'—'}</td>
             <td class="${preClass}">${pre.estado}</td>
@@ -1261,6 +1262,7 @@ function renderDetail(){
   return `
     <span class="back-link" id="back-to-pool">← Volver al pool</span>
     <div class="detail-header">
+      ${inf.foto_url ? `<img src="${inf.foto_url}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; border:1px solid var(--border);">` : ''}
       <div>
         <h2>${inf.favorito?'⭐ ':''}${inf.usuario_ig} ${inf.riesgo?`<span class="chip ${inf.riesgo==='Alto'?'pct-bad':inf.riesgo==='Bajo'?'gain':''}" style="font-size:11px;">Riesgo: ${inf.riesgo}</span>`:''}</h2>
         <div class="muted">${inf.categoria||'Sin categoría'} · Público masculino: <span class="${inf.publico_masculino_pct<60?'pct-bad':'pct-ok'}">${inf.publico_masculino_pct||'—'}%</span> · Seguidores: ${inf.seguidores?Number(inf.seguidores).toLocaleString('es-AR'):'—'} · Vista mín.: ${inf.vista_reel_min?Number(inf.vista_reel_min).toLocaleString('es-AR'):'—'}</div>
@@ -1565,12 +1567,19 @@ function openCargaRapidaModal(){
 }
 
 function openInfluencerModal(existing){
-  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', pais:'', fuente_captacion:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[], fecha_creacion: todayStr()};
+  const inf = existing || {id:uid(), usuario_ig:'', link_ig:'', contacto:'', categoria:'', pais:'', fuente_captacion:'', foto_url:'', publico_masculino_pct:'', seguidores:'', vista_reel_min:'', prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'', historial_contacto:[], historial_estadisticas:[], negociaciones:[], fecha_creacion: todayStr()};
   const overlay = document.createElement('div');
   overlay.className='overlay';
   overlay.innerHTML = `
     <div class="modal">
       <h2>${existing?'Editar influencer':'Nuevo influencer'} <span class="close" id="modal-close">×</span></h2>
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
+        <img id="m-foto-preview" src="${inf.foto_url||''}" style="width:64px; height:64px; border-radius:50%; object-fit:cover; background:var(--surface2); border:1px solid var(--border); ${inf.foto_url?'':'display:none;'}">
+        <div>
+          <input type="file" id="m-foto-file" accept="image/*" style="font-size:11px">
+          <div id="m-foto-status" class="ia-note"></div>
+        </div>
+      </div>
       <div class="grid2">
         <div class="field"><label>Usuario de Instagram</label><input id="m-usuario" value="${inf.usuario_ig}" placeholder="@usuario"></div>
         <div class="field"><label>Link de Instagram</label><input id="m-link" value="${inf.link_ig}" placeholder="https://instagram.com/..."></div>
@@ -1637,6 +1646,30 @@ function openInfluencerModal(existing){
   document.body.appendChild(overlay);
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+
+  document.getElementById('m-link').addEventListener('blur', ()=>{
+    const link = document.getElementById('m-link').value.trim();
+    const campoUsuario = document.getElementById('m-usuario');
+    if(!link || campoUsuario.value.trim()) return;
+    const match = link.match(/instagram\.com\/([a-zA-Z0-9_.]+)/);
+    if(match && match[1] && !['p','reel','reels','stories','explore'].includes(match[1])){
+      campoUsuario.value = '@' + match[1];
+    }
+  });
+
+  let fotoArchivo = null;
+  document.getElementById('m-foto-file').onchange = (e)=>{
+    const file = e.target.files[0];
+    if(!file) return;
+    fotoArchivo = file;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = document.getElementById('m-foto-preview');
+      img.src = reader.result;
+      img.style.display = '';
+    };
+    reader.readAsDataURL(file);
+  };
 
   let catBase64 = null, catMediaType = null;
   document.getElementById('m-cat-file').onchange = (e)=>{
@@ -1720,6 +1753,24 @@ function openInfluencerModal(existing){
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
+    if(fotoArchivo){
+      const supa = getSupabaseClient();
+      if(supa){
+        const status = document.getElementById('m-foto-status');
+        status.innerHTML = `<span class="spinner"></span>Subiendo foto...`;
+        try{
+          const path = `avatares/${inf.id}_${Date.now()}_${fotoArchivo.name}`;
+          const { error } = await supa.storage.from('capturas').upload(path, fotoArchivo);
+          if(error) throw error;
+          const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path);
+          inf.foto_url = urlData.publicUrl;
+          status.textContent = '';
+        }catch(err){
+          console.error('Error subiendo foto', err);
+          status.innerHTML = `<span class="pct-bad">No se pudo subir la foto.</span>`;
+        }
+      }
+    }
     const usuarioNorm = inf.usuario_ig.toLowerCase().replace('@','').trim();
     const linkNorm = document.getElementById('m-link').value.trim().toLowerCase().replace(/\/$/,'');
     const duplicado = state.influencers.find(otro=>{
