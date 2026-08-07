@@ -838,6 +838,15 @@ async function archivoABase64(file){
   });
 }
 
+const PROMPT_ESTADISTICAS = 'Estas son una o varias capturas de las estadísticas de audiencia de Instagram/TikTok de un influencer (género, edad, país) — la info puede estar repartida entre varias capturas, mirálas todas juntas. Respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, exactamente con este formato: {"pct_masculino": <entero 0-100 o null si no se ve>, "pct_femenino": <entero 0-100 o null>, "rango_edad_principal": "<ej 25-34, el rango con más porcentaje, o null>", "paises": [{"pais": "<nombre>", "pct": <número, puede tener decimales>}, ...hasta 5 países, ordenados de mayor a menor porcentaje, o array vacío si no se ve]}';
+
+function extraerAudienciaDePaises(paises){
+  if(!Array.isArray(paises) || !paises.length) return { paisPrincipal:'', textoResumen:'' };
+  const paisPrincipal = paises[0].pais || '';
+  const textoResumen = paises.slice(0,3).map(p=>`${p.pais} ${p.pct}%`).join(' · ');
+  return { paisPrincipal, textoResumen };
+}
+
 async function llamarGeminiVariasImagenes(prompt, archivos){
   const key = await getGeminiKey();
   if(!key){
@@ -1601,6 +1610,13 @@ function renderDetail(){
         <h2>${inf.favorito?'⭐ ':''}${inf.usuario_ig} ${inf.riesgo?`<span class="chip ${inf.riesgo==='Alto'?'pct-bad':inf.riesgo==='Bajo'?'gain':''}" style="font-size:11px;">Riesgo: ${inf.riesgo}</span>`:''}</h2>
         <div class="muted">${inf.categoria||'Sin categoría'} · Público masculino: <span class="${inf.publico_masculino_pct<60?'pct-bad':'pct-ok'}">${inf.publico_masculino_pct||'—'}%</span> · Seguidores: ${inf.seguidores?Number(inf.seguidores).toLocaleString('es-AR'):'—'} · Vista mín.: ${inf.vista_reel_min?Number(inf.vista_reel_min).toLocaleString('es-AR'):'—'} · Publicaciones: ${inf.cantidad_publicaciones||'—'}</div>
         ${(inf.redes&&inf.redes.length) ? `<div class="muted" style="margin-top:4px">Audiencia combinada (todas las cuentas): <span class="mono gain">${((Number(inf.seguidores)||0)+inf.redes.reduce((s,r)=>s+(Number(r.seguidores)||0),0)).toLocaleString('es-AR')}</span></div>` : ''}
+        ${(()=>{
+          const ultimaStats = (inf.historial_estadisticas||[]).slice().sort((a,b)=>b.fecha.localeCompare(a.fecha))[0];
+          if(!ultimaStats || !ultimaStats.paises_audiencia || !ultimaStats.paises_audiencia.length) return '';
+          const principal = ultimaStats.paises_audiencia[0];
+          const disperso = principal.pct < 30;
+          return `<div class="muted" style="margin-top:4px">Países de audiencia: ${ultimaStats.paises_audiencia.slice(0,3).map((p,i)=>`<span class="${i===0?'mono gain':''}">${p.pais} ${p.pct}%</span>`).join(' · ')}${disperso?' <span class="pct-bad" style="font-size:11px;">(dispersa, el principal no llega al 30%)</span>':''}</div>`;
+        })()}
         <div class="muted" style="margin-top:4px">Precalificación: <span class="${preClass}">${pre.estado}</span>${pre.motivo?` — ${pre.motivo}`:''}</div>
         <div class="muted" style="margin-top:4px">Código promo: <span class="mono">${inf.codigo_promocional||'—'}</span> · Logo: ${inf.logo_link?`<a href="${inf.logo_link}" target="_blank" style="color:var(--gold)">Ver logo</a>`:'—'}</div>
       </div>
@@ -1702,7 +1718,7 @@ function renderDetail(){
           <div class="neg-grid">
             <div><span class="k">% Masculino</span><span class="v ${s.pct_masculino<60?'pct-bad':'pct-ok'}">${s.pct_masculino!=null?s.pct_masculino+'%':'—'}</span></div>
             <div><span class="k">% Femenino</span><span class="v">${s.pct_femenino!=null?s.pct_femenino+'%':'—'}</span></div>
-            <div><span class="k">País principal</span><span class="v">${s.pais_principal||'—'}</span></div>
+            <div><span class="k">Países de audiencia</span><span class="v">${(s.paises_audiencia&&s.paises_audiencia.length) ? s.paises_audiencia.slice(0,3).map(p=>`${p.pais} ${p.pct}%`).join(' · ') : (s.pais_principal||'—')}</span></div>
             <div><span class="k">Rango de edad</span><span class="v">${s.rango_edad_principal||'—'}</span></div>
           </div>
           ${s.captura_url ? `<a href="${s.captura_url}" target="_blank" style="color:var(--gold); font-size:12px; display:inline-block; margin-top:8px;">Ver captura original</a>` : '<span class="muted" style="font-size:11px; display:block; margin-top:8px;">Sin imagen guardada</span>'}
@@ -2021,11 +2037,11 @@ function openCargaRapidaModal(){
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Leyendo ${crStatsArchivos.length} captura${crStatsArchivos.length>1?'s':''}...`;
     try{
-      const prompt = "Estas son una o varias capturas de las estadísticas de audiencia de Instagram (género, edad, país) — puede que estén repartidas entre varias, mirálas todas. Respondé SOLO con JSON: {\"pct_masculino\": <entero 0-100 o null>, \"pct_femenino\": <entero 0-100 o null>, \"pais_principal\": \"<país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
-      const texto = await llamarGeminiVariasImagenes(prompt, crStatsArchivos);
+      const texto = await llamarGeminiVariasImagenes(PROMPT_ESTADISTICAS, crStatsArchivos);
       const parsed = JSON.parse(texto.replace(/```json|```/g,'').trim());
-      crStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:parsed.pais_principal||'', rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
-      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}, país: ${parsed.pais_principal||'—'}</span>`;
+      const { paisPrincipal, textoResumen } = extraerAudienciaDePaises(parsed.paises);
+      crStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:paisPrincipal, paises_audiencia:parsed.paises||[], rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
+      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}${textoResumen?', audiencia: '+textoResumen:''}</span>`;
     }catch(err){
       status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
     }
@@ -2353,18 +2369,14 @@ function openInfluencerModal(existing){
     const status = document.getElementById('m-stats-status');
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Leyendo ${statsArchivos.length} captura${statsArchivos.length>1?'s':''}...`;
-    const prompt = "Estas son una o varias capturas de pantalla de las estadísticas de audiencia de Instagram de un influencer (género, edad, país) — puede que la información esté repartida entre varias capturas, mirálas todas juntas. Extraé exactamente estos datos y respondé SOLO con un JSON válido, sin texto adicional, sin markdown, con este formato exacto: {\"pct_masculino\": <número entero 0-100 o null si no se ve>, \"pct_femenino\": <número entero 0-100 o null>, \"pais_principal\": \"<nombre del país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
     try{
-      const texto = await llamarGeminiVariasImagenes(prompt, statsArchivos);
+      const texto = await llamarGeminiVariasImagenes(PROMPT_ESTADISTICAS, statsArchivos);
       const clean = texto.replace(/```json|```/g,'').trim();
       const parsed = JSON.parse(clean);
       if(parsed.pct_masculino!=null) document.getElementById('m-pct').value = parsed.pct_masculino;
-      if(parsed.pais_principal && !document.getElementById('m-pais').value){
-        const matchPais = PAISES.find(p=>parsed.pais_principal.toLowerCase().includes(p.toLowerCase()));
-        if(matchPais) document.getElementById('m-pais').value = matchPais;
-      }
-      statsPendiente = { id:uid(), fecha: todayStr(), pct_masculino: parsed.pct_masculino, pct_femenino: parsed.pct_femenino, pais_principal: parsed.pais_principal||'', rango_edad_principal: parsed.rango_edad_principal||'', captura_url: null };
-      status.innerHTML = `<span class="gain">Listo — se va a guardar en el historial al guardar el influencer.</span>`;
+      const { paisPrincipal, textoResumen } = extraerAudienciaDePaises(parsed.paises);
+      statsPendiente = { id:uid(), fecha: todayStr(), pct_masculino: parsed.pct_masculino, pct_femenino: parsed.pct_femenino, pais_principal: paisPrincipal, paises_audiencia: parsed.paises||[], rango_edad_principal: parsed.rango_edad_principal||'', captura_url: null };
+      status.innerHTML = `<span class="gain">Listo${textoResumen?' — audiencia: '+textoResumen:''} — se va a guardar en el historial al guardar el influencer.</span>`;
     }catch(err){
       if(err.message==='SIN_CLAVE'){
         status.innerHTML = 'Configurá la IA primero.';
@@ -2770,7 +2782,11 @@ function buildShareText(inf){
   if(inf.vista_reel_min) txt += `Vista mínima de reel: ${Number(inf.vista_reel_min).toLocaleString('es-AR')}\n`;
   if(inf.publico_masculino_pct) txt += `Audiencia masculina: ${inf.publico_masculino_pct}%\n`;
   if(stats){
-    if(stats.pais_principal) txt += `País principal: ${stats.pais_principal}\n`;
+    if(stats.paises_audiencia && stats.paises_audiencia.length){
+      txt += `Países de audiencia: ${stats.paises_audiencia.slice(0,3).map(p=>`${p.pais} ${p.pct}%`).join(', ')}\n`;
+    }else if(stats.pais_principal){
+      txt += `País principal: ${stats.pais_principal}\n`;
+    }
     if(stats.rango_edad_principal) txt += `Rango de edad: ${stats.rango_edad_principal}\n`;
     if(stats.captura_url){
       txt += `Captura original de las estadísticas: ${stats.captura_url}\n`;
@@ -3056,7 +3072,7 @@ function openRedModal(infId, existingRed){
         <span class="ia-note">o pegá con Ctrl+V</span>
         <button class="ghost" id="red-stats-leer" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer estadísticas con IA</button>
         <div id="red-stats-status" class="ia-note"></div>
-        ${r.historial_estadisticas.length ? `<div style="margin-top:8px;">${r.historial_estadisticas.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(s=>`<div class="contact-entry"><span>${s.fecha} · ${s.pct_masculino!=null?s.pct_masculino+'% masculino':'—'} · ${s.pais_principal||'—'}</span></div>`).join('')}</div>` : '<p class="muted" style="font-size:12px;">Sin capturas cargadas todavía.</p>'}
+        ${r.historial_estadisticas.length ? `<div style="margin-top:8px;">${r.historial_estadisticas.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(s=>`<div class="contact-entry"><span>${s.fecha} · ${s.pct_masculino!=null?s.pct_masculino+'% masculino':'—'} · ${(s.paises_audiencia&&s.paises_audiencia.length)?s.paises_audiencia.slice(0,3).map(p=>`${p.pais} ${p.pct}%`).join(' · '):(s.pais_principal||'—')}</span></div>`).join('')}</div>` : '<p class="muted" style="font-size:12px;">Sin capturas cargadas todavía.</p>'}
       </div>
 
       <div class="modal-actions">
@@ -3169,11 +3185,11 @@ function openRedModal(infId, existingRed){
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Leyendo ${redStatsArchivos.length} captura${redStatsArchivos.length>1?'s':''}...`;
     try{
-      const prompt = "Estas son una o varias capturas de las estadísticas de audiencia (género, edad, país) — puede que estén repartidas entre varias, mirálas todas. Respondé SOLO con JSON: {\"pct_masculino\": <entero 0-100 o null>, \"pct_femenino\": <entero 0-100 o null>, \"pais_principal\": \"<país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
-      const texto = await llamarGeminiVariasImagenes(prompt, redStatsArchivos);
+      const texto = await llamarGeminiVariasImagenes(PROMPT_ESTADISTICAS, redStatsArchivos);
       const parsed = JSON.parse(texto.replace(/```json|```/g,'').trim());
-      redStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:parsed.pais_principal||'', rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
-      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}, país: ${parsed.pais_principal||'—'}</span>`;
+      const { paisPrincipal, textoResumen } = extraerAudienciaDePaises(parsed.paises);
+      redStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:paisPrincipal, paises_audiencia:parsed.paises||[], rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
+      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}${textoResumen?', audiencia: '+textoResumen:''}</span>`;
     }catch(err){
       status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
     }
@@ -3289,6 +3305,7 @@ function openStatsModal(infId){
   document.getElementById('modal-cancel').onclick = ()=>{ pegadoActivo=null; overlay.remove(); };
 
   let archivosStatsExistente = [];
+  let paisesAudienciaCapturados = [];
   pegadoActivo = null;
   function actualizarPreviewExistente(){
     document.getElementById('s-preview-wrap').innerHTML = archivosStatsExistente.map(f=>`<img class="stat-preview" src="${URL.createObjectURL(f)}" style="max-width:120px; margin-right:8px;">`).join('');
@@ -3304,15 +3321,16 @@ function openStatsModal(infId){
     btn.disabled = true;
     status.innerHTML = `<span class="spinner"></span>Leyendo ${archivosStatsExistente.length} captura${archivosStatsExistente.length>1?'s':''}...`;
     try{
-      const prompt = "Estas son una o varias capturas de las estadísticas de audiencia de un perfil de Instagram o TikTok (género, edad, país de los seguidores) — puede que estén repartidas entre varias, mirálas todas juntas. Extraé los datos y respondé ÚNICAMENTE con un JSON válido, sin texto adicional, sin markdown, exactamente con este formato: {\"pct_masculino\": <entero 0-100 o null>, \"pct_femenino\": <entero 0-100 o null>, \"pais_principal\": \"<nombre del país o null>\", \"rango_edad_principal\": \"<ej 25-34, o null>\"}";
-      const text = await llamarGeminiVariasImagenes(prompt, archivosStatsExistente);
+      const text = await llamarGeminiVariasImagenes(PROMPT_ESTADISTICAS, archivosStatsExistente);
       const clean = text.replace(/```json|```/g,'').trim();
       const parsed = JSON.parse(clean);
       if(parsed.pct_masculino!=null) document.getElementById('s-masc').value = parsed.pct_masculino;
       if(parsed.pct_femenino!=null) document.getElementById('s-fem').value = parsed.pct_femenino;
-      if(parsed.pais_principal) document.getElementById('s-pais').value = parsed.pais_principal;
+      paisesAudienciaCapturados = parsed.paises||[];
+      const { paisPrincipal, textoResumen } = extraerAudienciaDePaises(parsed.paises);
+      if(paisPrincipal) document.getElementById('s-pais').value = paisPrincipal;
       if(parsed.rango_edad_principal) document.getElementById('s-edad').value = parsed.rango_edad_principal;
-      status.textContent = 'Listo — revisá los datos antes de guardar.';
+      status.textContent = textoResumen ? `Listo — audiencia: ${textoResumen}. Revisá antes de guardar.` : 'Listo — revisá los datos antes de guardar.';
     }catch(err){
       if(err.message==='SIN_CLAVE'){
         status.innerHTML = 'Todavía no configuraste la IA. <span style="color:var(--gold); cursor:pointer; text-decoration:underline" id="s-ir-config">Configurarla ahora</span>';
@@ -3334,6 +3352,7 @@ function openStatsModal(infId){
       pct_masculino: document.getElementById('s-masc').value!=='' ? Number(document.getElementById('s-masc').value) : null,
       pct_femenino: document.getElementById('s-fem').value!=='' ? Number(document.getElementById('s-fem').value) : null,
       pais_principal: document.getElementById('s-pais').value.trim(),
+      paises_audiencia: paisesAudienciaCapturados,
       rango_edad_principal: document.getElementById('s-edad').value.trim(),
       captura_url: null
     };
@@ -3356,10 +3375,6 @@ function openStatsModal(infId){
     inf.historial_estadisticas = inf.historial_estadisticas || [];
     inf.historial_estadisticas.push(entry);
     if(entry.pct_masculino!=null) inf.publico_masculino_pct = entry.pct_masculino;
-    if(!inf.pais && entry.pais_principal){
-      const matchPais = PAISES.find(p=>entry.pais_principal.toLowerCase().includes(p.toLowerCase()));
-      if(matchPais) inf.pais = matchPais;
-    }
     await saveData();
     pegadoActivo = null;
     overlay.remove();
