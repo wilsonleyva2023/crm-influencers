@@ -1678,6 +1678,8 @@ function openInfluencerModal(existing){
         <img id="m-foto-preview" src="${inf.foto_url||''}" style="width:64px; height:64px; border-radius:50%; object-fit:cover; background:var(--surface2); border:1px solid var(--border); ${inf.foto_url?'':'display:none;'}">
         <div>
           <input type="file" id="m-foto-file" accept="image/*" style="font-size:11px">
+          <div class="ia-note">O pegá una captura con Ctrl+V estando en esta ventana.</div>
+          <button class="ghost" id="m-foto-recortar" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Recortar foto de perfil con IA</button>
           <div id="m-foto-status" class="ia-note"></div>
         </div>
       </div>
@@ -1751,8 +1753,12 @@ function openInfluencerModal(existing){
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById('modal-close').onclick = ()=>overlay.remove();
-  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  const cerrarModalInfluencer = ()=>{
+    document.removeEventListener('paste', manejarPegado);
+    overlay.remove();
+  };
+  document.getElementById('modal-close').onclick = cerrarModalInfluencer;
+  document.getElementById('modal-cancel').onclick = cerrarModalInfluencer;
 
   document.getElementById('m-link').addEventListener('blur', ()=>{
     const link = document.getElementById('m-link').value.trim();
@@ -1765,8 +1771,8 @@ function openInfluencerModal(existing){
   });
 
   let fotoArchivo = null;
-  document.getElementById('m-foto-file').onchange = (e)=>{
-    const file = e.target.files[0];
+
+  function cargarFoto(file){
     if(!file) return;
     fotoArchivo = file;
     const reader = new FileReader();
@@ -1774,8 +1780,66 @@ function openInfluencerModal(existing){
       const img = document.getElementById('m-foto-preview');
       img.src = reader.result;
       img.style.display = '';
+      img.style.borderRadius = '8px'; // hasta que se recorte, se ve completa (no redonda)
+      document.getElementById('m-foto-recortar').style.display = '';
+      document.getElementById('m-foto-status').textContent = '';
     };
     reader.readAsDataURL(file);
+  }
+
+  document.getElementById('m-foto-file').onchange = (e)=>cargarFoto(e.target.files[0]);
+
+  const manejarPegado = (e)=>{
+    if(!document.body.contains(overlay)) return; // el modal ya se cerró
+    const items = e.clipboardData?.items;
+    if(!items) return;
+    for(const item of items){
+      if(item.type.startsWith('image/')){
+        cargarFoto(item.getAsFile());
+        e.preventDefault();
+        break;
+      }
+    }
+  };
+  document.addEventListener('paste', manejarPegado);
+
+  document.getElementById('m-foto-recortar').onclick = async ()=>{
+    const btn = document.getElementById('m-foto-recortar');
+    const status = document.getElementById('m-foto-status');
+    const previewImg = document.getElementById('m-foto-preview');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Buscando la foto de perfil en la imagen...`;
+    try{
+      const base64 = previewImg.src.split(',')[1];
+      const mediaType = fotoArchivo.type || 'image/png';
+      const prompt = "Esta es una captura de un perfil de red social. Encontrá la foto de perfil circular (el avatar redondo, normalmente arriba a la izquierda). Respondé ÚNICAMENTE con un JSON con la posición del cuadrado que la contiene, en porcentaje del ancho/alto total de la imagen: {\"x\": <% desde el borde izquierdo hasta el borde izquierdo del avatar>, \"y\": <% desde arriba hasta el borde superior del avatar>, \"size\": <% del ancho total que ocupa el diámetro del avatar>}";
+      const texto = await llamarGemini(prompt, base64, mediaType);
+      const clean = texto.replace(/```json|```/g,'').trim();
+      const box = JSON.parse(clean);
+
+      const imgObj = new Image();
+      imgObj.onload = ()=>{
+        const canvas = document.createElement('canvas');
+        const outSize = 300;
+        canvas.width = outSize; canvas.height = outSize;
+        const ctx = canvas.getContext('2d');
+        const sx = (box.x/100) * imgObj.naturalWidth;
+        const sy = (box.y/100) * imgObj.naturalHeight;
+        const sSize = (box.size/100) * imgObj.naturalWidth;
+        ctx.drawImage(imgObj, sx, sy, sSize, sSize, 0, 0, outSize, outSize);
+        canvas.toBlob((blob)=>{
+          fotoArchivo = blob;
+          previewImg.src = URL.createObjectURL(blob);
+          previewImg.style.borderRadius = '50%';
+          status.innerHTML = '<span class="gain">Listo — recortada.</span>';
+          btn.disabled = false;
+        }, 'image/jpeg', 0.92);
+      };
+      imgObj.src = previewImg.src;
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">No pude encontrarla sola (${err.message}). Recortala vos con cualquier editor y subila así.</span>`;
+      btn.disabled = false;
+    }
   };
 
   let catBase64 = null, catMediaType = null;
@@ -1963,6 +2027,7 @@ function openInfluencerModal(existing){
     inf.historial_contacto = inf.historial_contacto || [];
     if(!existing) state.influencers.push(inf);
     await saveData();
+    document.removeEventListener('paste', manejarPegado);
     overlay.remove();
     render();
   };
