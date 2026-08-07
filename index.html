@@ -260,6 +260,26 @@ document.addEventListener('paste', (e)=>{
   }
 });
 
+function formatearNumeroCorto(n){
+  n = Number(n);
+  if(!n) return '';
+  if(n >= 1000000) return (n/1000000).toLocaleString('es-AR',{maximumFractionDigits:1}) + ' M';
+  if(n >= 1000) return Math.round(n/1000).toLocaleString('es-AR') + ' mil';
+  return n.toLocaleString('es-AR');
+}
+
+function agregarFormatoNumerico(inputId){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const hint = document.createElement('div');
+  hint.className = 'ia-note';
+  hint.id = inputId + '-hint';
+  input.insertAdjacentElement('afterend', hint);
+  const actualizar = ()=>{ hint.textContent = input.value ? `= ${input.value.toLocaleString?input.value.toLocaleString('es-AR'):Number(input.value).toLocaleString('es-AR')} (${formatearNumeroCorto(input.value)})` : ''; };
+  input.addEventListener('input', actualizar);
+  actualizar();
+}
+
 function comprimirImagen(file, maxDim=600, calidad=0.8){
   return new Promise((resolve)=>{
     const reader = new FileReader();
@@ -919,6 +939,15 @@ function getAlerts(){
     if(inf.cooldown_hasta && inf.cooldown_hasta <= today && !estaOcupado(inf)){
       alerts.push({tipo:'compress', texto:`${inf.usuario_ig} — ya venció el cooldown con la otra marca, lo podés reofrecer.`, infId: inf.id});
     }
+    (inf.redes||[]).forEach(r=>{
+      if(!r.desvinculada) return;
+      if(r.motivo_desvinculo==='sancionada' && r.recordatorio_activo && r.fecha_proximo_recordatorio && r.fecha_proximo_recordatorio<=today){
+        alerts.push({tipo:'warn', texto:`${inf.usuario_ig} — preguntale si ya recuperó su cuenta de ${r.plataforma} (${r.usuario||r.link}), sancionada el ${r.fecha_desvinculo}.`, infId: inf.id});
+      }
+      if(r.motivo_desvinculo==='vendida' && !r.resuelta){
+        alerts.push({tipo:'pago', texto:`${inf.usuario_ig} — su cuenta de ${r.plataforma} (${r.usuario||r.link}) fue vendida el ${r.fecha_desvinculo}. Prioridad: contactar al nuevo dueño.`, infId: inf.id});
+      }
+    });
   });
   return alerts;
 }
@@ -1470,7 +1499,7 @@ function renderDetail(){
         <h3 style="margin:0">Otras cuentas / redes</h3>
         <button class="ghost" id="btn-new-red">+ Agregar cuenta</button>
       </div>
-      ${(inf.redes&&inf.redes.length) ? inf.redes.map(r=>`
+      ${(inf.redes&&inf.redes.filter(r=>!r.desvinculada).length) ? inf.redes.filter(r=>!r.desvinculada).map(r=>`
         <div class="contact-entry" style="align-items:center;">
           <span>
             <span class="chip" style="margin-right:8px;">${r.plataforma}</span>
@@ -1485,6 +1514,29 @@ function renderDetail(){
           </span>
         </div>
       `).join('') : '<p class="muted">Sin otras cuentas cargadas.</p>'}
+      ${(inf.redes&&inf.redes.some(r=>r.desvinculada)) ? `
+        <div class="contact-log">
+          <span class="k" style="margin-bottom:8px; display:block;">Cuentas desvinculadas</span>
+          ${inf.redes.filter(r=>r.desvinculada).map(r=>{
+            const motivoTexto = {robada:'Robada', sancionada:'Sancionada', vendida:'Vendida / cedida', otro:'Desvinculada'}[r.motivo_desvinculo]||'Desvinculada';
+            let accion = '';
+            if(r.motivo_desvinculo==='sancionada' && r.recordatorio_activo && r.fecha_proximo_recordatorio){
+              accion = `<span class="ia-note">Próximo recordatorio: ${r.fecha_proximo_recordatorio} <span style="color:var(--gold); cursor:pointer; text-decoration:underline; margin-left:6px;" data-posponer-red="${r.id}">Posponer</span> <span style="color:var(--coral); cursor:pointer; text-decoration:underline; margin-left:6px;" data-no-recordar-red="${r.id}">No recordar más</span></span>`;
+            }else if(r.motivo_desvinculo==='vendida' && !r.resuelta){
+              accion = `<span class="ia-note"><span style="color:var(--gold); cursor:pointer; text-decoration:underline;" data-resolver-red="${r.id}">Ya me contacté con el nuevo dueño</span></span>`;
+            }
+            return `
+            <div class="contact-entry" style="align-items:flex-start;">
+              <span>
+                <span class="chip" style="margin-right:8px;">${r.plataforma}</span>
+                ${r.usuario||r.link||'—'} · <span class="${r.motivo_desvinculo==='vendida'&&!r.resuelta?'pct-bad':'muted'}">${motivoTexto}</span> (${r.fecha_desvinculo})
+                ${r.notas_desvinculo?`<br><span class="ia-note">${r.notas_desvinculo}</span>`:''}
+                <br>${accion}
+              </span>
+            </div>`;
+          }).join('')}
+        </div>
+      ` : ''}
     </div>
 
     <div class="detail-section">
@@ -1777,6 +1829,8 @@ function openCargaRapidaModal(){
   }
   document.getElementById('cr-foto-file').onchange = (e)=>cargarCrFoto(e.target.files[0]);
   habilitarPegado('cr-foto-file', cargarCrFoto);
+  agregarFormatoNumerico('cr-seguidores');
+  agregarFormatoNumerico('cr-vista');
 
   document.getElementById('cr-foto-leer').onclick = async ()=>{
     const btn = document.getElementById('cr-foto-leer');
@@ -2059,6 +2113,8 @@ function openInfluencerModal(existing){
 
   document.getElementById('m-foto-file').onchange = (e)=>cargarFoto(e.target.files[0]);
   habilitarPegado('m-foto-file', cargarFoto);
+  agregarFormatoNumerico('m-seguidores');
+  agregarFormatoNumerico('m-vistamin');
 
   document.getElementById('m-foto-recortar').onclick = async ()=>{
     const btn = document.getElementById('m-foto-recortar');
@@ -2380,6 +2436,9 @@ function openNegModal(infId, existingNeg){
   document.body.appendChild(overlay);
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  agregarFormatoNumerico('n-presupuesto');
+  agregarFormatoNumerico('n-oferta');
+  agregarFormatoNumerico('n-pago');
   if(!existingNeg){
     const sug = sugerirOferta(inf);
     if(sug){
@@ -2803,6 +2862,58 @@ function openMensajeIAModal(infId, negId){
   };
 }
 
+function openDesvincularModal(infId, redId){
+  const inf = state.influencers.find(i=>i.id===infId);
+  const r = inf.redes.find(x=>x.id===redId);
+  const overlay = document.createElement('div');
+  overlay.className='overlay';
+  overlay.innerHTML = `
+    <div class="modal" style="max-width:420px">
+      <h2>Desvincular cuenta <span class="close" id="modal-close">×</span></h2>
+      <p class="muted" style="margin-bottom:14px">${r.plataforma} · ${r.usuario||r.link} — ¿por qué ya no la maneja este influencer?</p>
+      <div class="field">
+        <select id="dv-motivo">
+          <option value="robada">Se la robaron</option>
+          <option value="sancionada">La sancionaron / suspendieron</option>
+          <option value="vendida">La vendió / cedió a otra persona</option>
+          <option value="otro">Otro motivo</option>
+        </select>
+      </div>
+      <div class="field" id="dv-dias-wrap"><label>¿En cuántos días te recuerdo preguntarle si la recuperó?</label><input id="dv-dias" type="number" value="20"></div>
+      <div class="field"><label>Notas (opcional)</label><textarea id="dv-notas" rows="2"></textarea></div>
+      <div class="modal-actions">
+        <button class="ghost" id="modal-cancel">Cancelar</button>
+        <button class="primary" id="dv-guardar">Desvincular y guardar motivo</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  document.getElementById('modal-close').onclick = ()=>overlay.remove();
+  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  const actualizarVista = ()=>{
+    document.getElementById('dv-dias-wrap').style.display = document.getElementById('dv-motivo').value==='sancionada' ? '' : 'none';
+  };
+  document.getElementById('dv-motivo').onchange = actualizarVista;
+  actualizarVista();
+  document.getElementById('dv-guardar').onclick = async ()=>{
+    const motivo = document.getElementById('dv-motivo').value;
+    r.desvinculada = true;
+    r.motivo_desvinculo = motivo;
+    r.fecha_desvinculo = todayStr();
+    r.notas_desvinculo = document.getElementById('dv-notas').value.trim();
+    r.resuelta = false;
+    if(motivo==='sancionada'){
+      const dias = Number(document.getElementById('dv-dias').value)||20;
+      const fecha = new Date(); fecha.setDate(fecha.getDate()+dias);
+      r.fecha_proximo_recordatorio = fecha.toISOString().slice(0,10);
+      r.recordatorio_activo = true;
+    }
+    await saveData();
+    overlay.remove();
+    render();
+  };
+}
+
 function openRedModal(infId, existingRed){
   const inf = state.influencers.find(i=>i.id===infId);
   const r = existingRed || {id:uid(), plataforma:'Instagram', usuario:'', link:'', seguidores:'', notas:'', activa:true, codigo_promocional:'', fecha_actualizacion:todayStr()};
@@ -2822,9 +2933,11 @@ function openRedModal(infId, existingRed){
       <div class="field"><label>Código promocional propio (opcional, si usa uno distinto al principal)</label><input id="red-promo" value="${r.codigo_promocional||''}"></div>
       <div class="field"><label>Notas (opcional)</label><textarea id="red-notas" rows="2">${r.notas||''}</textarea></div>
       <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="red-activa" style="width:auto" ${r.activa!==false?'checked':''}> Cuenta activa</label></div>
+      <p class="ia-note"><i>Contacto: ${inf.contacto ? `mismo que la cuenta principal — ${inf.contacto}` : 'la cuenta principal no tiene contacto cargado todavía'}</i></p>
       ${r.fecha_actualizacion ? `<p class="ia-note">Datos actualizados por última vez: ${r.fecha_actualizacion}${daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' <span class="pct-bad">(hace más de 90 días, capaz conviene revisar)</span>' : ''}</p>` : ''}
       <div class="modal-actions">
         ${existingRed ? `<button class="ghost" id="modal-promover">Promover a principal</button>` : ''}
+        ${existingRed ? `<button class="ghost" style="color:var(--gold); border-color:var(--gold-dim)" id="modal-desvincular">Desvincular</button>` : ''}
         ${existingRed ? `<button class="ghost" style="color:var(--coral); border-color:var(--coral-dim)" id="modal-delete-red">Eliminar</button>` : ''}
         <button class="ghost" id="modal-cancel">Cancelar</button>
         <button class="primary" id="modal-save">Guardar</button>
@@ -2834,6 +2947,10 @@ function openRedModal(infId, existingRed){
   document.body.appendChild(overlay);
   document.getElementById('modal-close').onclick = ()=>overlay.remove();
   document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-desvincular')?.addEventListener('click', ()=>{
+    overlay.remove();
+    openDesvincularModal(infId, r.id);
+  });
   document.getElementById('modal-delete-red')?.addEventListener('click', async ()=>{
     if(!confirm('¿Eliminar esta cuenta?')) return;
     inf.redes = inf.redes.filter(x=>x.id!==r.id);
@@ -3262,6 +3379,36 @@ function attachEvents(){
         if(!confirm('¿Eliminar esta cuenta?')) return;
         const inf = state.influencers.find(i=>i.id===state.detailId);
         inf.redes = inf.redes.filter(r=>r.id!==el.dataset.deleteRed);
+        await saveData();
+        render();
+      };
+    });
+    document.querySelectorAll('[data-posponer-red]').forEach(el=>{
+      el.onclick = async ()=>{
+        const dias = prompt('¿En cuántos días te recuerdo de nuevo?', '20');
+        if(!dias || isNaN(Number(dias))) return;
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const r = inf.redes.find(x=>x.id===el.dataset.posponerRed);
+        const fecha = new Date(); fecha.setDate(fecha.getDate()+Number(dias));
+        r.fecha_proximo_recordatorio = fecha.toISOString().slice(0,10);
+        await saveData();
+        render();
+      };
+    });
+    document.querySelectorAll('[data-no-recordar-red]').forEach(el=>{
+      el.onclick = async ()=>{
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const r = inf.redes.find(x=>x.id===el.dataset.noRecordarRed);
+        r.recordatorio_activo = false;
+        await saveData();
+        render();
+      };
+    });
+    document.querySelectorAll('[data-resolver-red]').forEach(el=>{
+      el.onclick = async ()=>{
+        const inf = state.influencers.find(i=>i.id===state.detailId);
+        const r = inf.redes.find(x=>x.id===el.dataset.resolverRed);
+        r.resuelta = true;
         await saveData();
         render();
       };
