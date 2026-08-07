@@ -348,7 +348,14 @@ function migrate(inf){
   inf.historial_estadisticas = inf.historial_estadisticas || [];
   inf.codigo_promocional = inf.codigo_promocional || '';
   inf.logo_link = inf.logo_link || '';
-  inf.redes = inf.redes || [];
+  inf.redes = (inf.redes || []).map(r=>{
+    r.foto_url = r.foto_url || '';
+    r.vista_reel_min = r.vista_reel_min || '';
+    r.publico_masculino_pct = r.publico_masculino_pct || '';
+    r.cantidad_publicaciones = r.cantidad_publicaciones || '';
+    r.historial_estadisticas = r.historial_estadisticas || [];
+    return r;
+  });
   inf.pais = inf.pais || '';
   inf.fuente_captacion = inf.fuente_captacion || '';
   inf.foto_url = inf.foto_url || '';
@@ -1053,8 +1060,11 @@ function renderPool(){
   let rows = state.influencers;
 
   return `
-    <div class="toolbar">
-      <input class="search" id="f-search" placeholder="Buscar por usuario (cualquier red)..." value="${search}">
+    <div class="toolbar" style="position:relative;">
+      <div style="position:relative; flex:1; min-width:180px;">
+        <input class="search" id="f-search" placeholder="Buscar por usuario (cualquier red)..." value="${search}" autocomplete="off" style="width:100%;">
+        <div id="f-search-sugerencias" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--surface2); border:1px solid var(--border); border-radius:8px; margin-top:4px; z-index:50; max-height:280px; overflow-y:auto;"></div>
+      </div>
       <select id="f-cat">
         <option value="">Todas las categorías</option>
         ${CATEGORIAS.map(c=>`<option ${cat===c?'selected':''}>${c}</option>`).join('')}
@@ -1501,12 +1511,16 @@ function renderDetail(){
       </div>
       ${(inf.redes&&inf.redes.filter(r=>!r.desvinculada).length) ? inf.redes.filter(r=>!r.desvinculada).map(r=>`
         <div class="contact-entry" style="align-items:center;">
-          <span>
-            <span class="chip" style="margin-right:8px;">${r.plataforma}</span>
-            ${r.activa===false ? '<span class="chip pct-bad" style="margin-right:8px;">Inactiva</span>' : ''}
-            ${r.usuario||'—'} ${r.seguidores?`· ${Number(r.seguidores).toLocaleString('es-AR')} seguidores`:''}
-            ${r.link?` · <a href="${r.link}" target="_blank" style="color:var(--gold)">abrir</a>`:''}
-            ${r.fecha_actualizacion && daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' · <span class="pct-bad" style="font-size:11px;">datos desactualizados</span>' : ''}
+          <span style="display:flex; align-items:center; gap:8px;">
+            ${r.foto_url ? `<img src="${r.foto_url}" data-ver-grande="${r.foto_url}" style="width:24px; height:24px; border-radius:50%; object-fit:cover; cursor:pointer; flex-shrink:0;">` : `<span style="display:inline-block; width:24px; height:24px; border-radius:50%; background:var(--surface2); flex-shrink:0;"></span>`}
+            <span>
+              <span class="chip" style="margin-right:8px;">${r.plataforma}</span>
+              ${r.activa===false ? '<span class="chip pct-bad" style="margin-right:8px;">Inactiva</span>' : ''}
+              ${r.usuario||'—'} ${r.seguidores?`· ${Number(r.seguidores).toLocaleString('es-AR')} seguidores`:''}
+              ${r.publico_masculino_pct?` · ${r.publico_masculino_pct}% masculino`:''}
+              ${r.link?` · <a href="${r.link}" target="_blank" style="color:var(--gold)">abrir</a>`:''}
+              ${r.fecha_actualizacion && daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' · <span class="pct-bad" style="font-size:11px;">datos desactualizados</span>' : ''}
+            </span>
           </span>
           <span style="display:flex; gap:10px;">
             <span class="fecha" style="cursor:pointer" data-edit-red="${r.id}">Editar</span>
@@ -2916,12 +2930,25 @@ function openDesvincularModal(infId, redId){
 
 function openRedModal(infId, existingRed){
   const inf = state.influencers.find(i=>i.id===infId);
-  const r = existingRed || {id:uid(), plataforma:'Instagram', usuario:'', link:'', seguidores:'', notas:'', activa:true, codigo_promocional:'', fecha_actualizacion:todayStr()};
+  const r = existingRed || {id:uid(), plataforma:'Instagram', usuario:'', link:'', seguidores:'', vista_reel_min:'', publico_masculino_pct:'', cantidad_publicaciones:'', notas:'', activa:true, codigo_promocional:'', foto_url:'', historial_estadisticas:[], fecha_actualizacion:todayStr()};
+  r.historial_estadisticas = r.historial_estadisticas || [];
   const overlay = document.createElement('div');
   overlay.className='overlay';
   overlay.innerHTML = `
-    <div class="modal" style="max-width:440px">
+    <div class="modal" style="max-width:480px">
       <h2>${existingRed?'Editar cuenta':'Agregar cuenta'} <span class="close" id="modal-close">×</span></h2>
+
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
+        <img id="red-foto-preview" src="${r.foto_url||''}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--surface2); border:1px solid var(--border); ${r.foto_url?'':'display:none;'}">
+        <div>
+          <input type="file" id="red-foto-file" accept="image/*" style="font-size:11px">
+          <button class="ghost" id="red-foto-quitar" style="font-size:11px; padding:5px 10px; ${r.foto_url?'':'display:none;'}">Quitar foto</button>
+          <div class="ia-note">O pegá con Ctrl+V</div>
+          <button class="ghost" id="red-foto-leer" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer perfil con IA</button>
+          <div id="red-foto-status" class="ia-note"></div>
+        </div>
+      </div>
+
       <div class="field"><label>Plataforma</label>
         <select id="red-plataforma">
           ${PLATAFORMAS.map(p=>`<option ${r.plataforma===p?'selected':''}>${p}</option>`).join('')}
@@ -2930,11 +2957,23 @@ function openRedModal(infId, existingRed){
       <div class="field"><label>Usuario / nombre</label><input id="red-usuario" value="${r.usuario}" placeholder="@usuario"></div>
       <div class="field"><label>Link</label><input id="red-link" value="${r.link}" placeholder="https://..."></div>
       <div class="field"><label>Seguidores (opcional)</label><input id="red-seguidores" type="number" value="${r.seguidores}"></div>
+      <div class="field"><label>Vista mínima de reel (opcional)</label><input id="red-vista" type="number" value="${r.vista_reel_min||''}"></div>
+      <div class="field"><label>Cantidad de publicaciones (opcional)</label><input id="red-publicaciones" type="number" value="${r.cantidad_publicaciones||''}"></div>
       <div class="field"><label>Código promocional propio (opcional, si usa uno distinto al principal)</label><input id="red-promo" value="${r.codigo_promocional||''}"></div>
       <div class="field"><label>Notas (opcional)</label><textarea id="red-notas" rows="2">${r.notas||''}</textarea></div>
       <div class="field"><label style="display:flex; align-items:center; gap:8px; text-transform:none; font-size:13px; cursor:pointer;"><input type="checkbox" id="red-activa" style="width:auto" ${r.activa!==false?'checked':''}> Cuenta activa</label></div>
       <p class="ia-note"><i>Contacto: ${inf.contacto ? `mismo que la cuenta principal — ${inf.contacto}` : 'la cuenta principal no tiene contacto cargado todavía'}</i></p>
       ${r.fecha_actualizacion ? `<p class="ia-note">Datos actualizados por última vez: ${r.fecha_actualizacion}${daysBetween(r.fecha_actualizacion, todayStr())>=90 ? ' <span class="pct-bad">(hace más de 90 días, capaz conviene revisar)</span>' : ''}</p>` : ''}
+
+      <div class="field" style="margin-top:14px;">
+        <label>Estadísticas de audiencia de esta cuenta</label>
+        <input type="file" id="red-stats-file" accept="image/*" style="font-size:11px">
+        <span class="ia-note">o pegá con Ctrl+V</span>
+        <button class="ghost" id="red-stats-leer" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer estadísticas con IA</button>
+        <div id="red-stats-status" class="ia-note"></div>
+        ${r.historial_estadisticas.length ? `<div style="margin-top:8px;">${r.historial_estadisticas.slice().sort((a,b)=>b.fecha.localeCompare(a.fecha)).map(s=>`<div class="contact-entry"><span>${s.fecha} · ${s.pct_masculino!=null?s.pct_masculino+'% masculino':'—'} · ${s.pais_principal||'—'}</span></div>`).join('')}</div>` : '<p class="muted" style="font-size:12px;">Sin capturas cargadas todavía.</p>'}
+      </div>
+
       <div class="modal-actions">
         ${existingRed ? `<button class="ghost" id="modal-promover">Promover a principal</button>` : ''}
         ${existingRed ? `<button class="ghost" style="color:var(--gold); border-color:var(--gold-dim)" id="modal-desvincular">Desvincular</button>` : ''}
@@ -2945,8 +2984,9 @@ function openRedModal(infId, existingRed){
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById('modal-close').onclick = ()=>overlay.remove();
-  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  const cerrarRed = ()=>{ pegadoActivo=null; overlay.remove(); };
+  document.getElementById('modal-close').onclick = cerrarRed;
+  document.getElementById('modal-cancel').onclick = cerrarRed;
   document.getElementById('modal-desvincular')?.addEventListener('click', ()=>{
     overlay.remove();
     openDesvincularModal(infId, r.id);
@@ -2962,12 +3002,18 @@ function openRedModal(infId, existingRed){
     if(!confirm(`Esto va a hacer que "${r.usuario||r.link}" pase a ser la cuenta principal, y la actual (${inf.usuario_ig}) pasa a la lista de otras cuentas. ¿Continuar?`)) return;
     const principalVieja = {
       id: uid(), plataforma:'Instagram', usuario: inf.usuario_ig, link: inf.link_ig,
-      seguidores: inf.seguidores, notas:'Cuenta principal anterior', activa:true,
-      codigo_promocional: inf.codigo_promocional, fecha_actualizacion: todayStr()
+      seguidores: inf.seguidores, vista_reel_min: inf.vista_reel_min, publico_masculino_pct: inf.publico_masculino_pct,
+      cantidad_publicaciones: inf.cantidad_publicaciones, foto_url: inf.foto_url, historial_estadisticas: inf.historial_estadisticas||[],
+      notas:'Cuenta principal anterior', activa:true, codigo_promocional: inf.codigo_promocional, fecha_actualizacion: todayStr()
     };
     inf.usuario_ig = r.usuario || inf.usuario_ig;
     inf.link_ig = r.link || '';
     inf.seguidores = r.seguidores || '';
+    inf.vista_reel_min = r.vista_reel_min || '';
+    inf.publico_masculino_pct = r.publico_masculino_pct || '';
+    inf.cantidad_publicaciones = r.cantidad_publicaciones || '';
+    inf.foto_url = r.foto_url || '';
+    inf.historial_estadisticas = r.historial_estadisticas || [];
     if(r.codigo_promocional) inf.codigo_promocional = r.codigo_promocional;
     inf.redes = inf.redes.filter(x=>x.id!==r.id);
     inf.redes.push(principalVieja);
@@ -2975,6 +3021,101 @@ function openRedModal(infId, existingRed){
     overlay.remove();
     render();
   });
+
+  // --- Foto propia de la cuenta ---
+  let redFotoArchivo = null, redFotoQuitada = false;
+  pegadoActivo = null;
+  function cargarRedFoto(file){
+    if(!file) return;
+    redFotoArchivo = file;
+    redFotoQuitada = false;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = document.getElementById('red-foto-preview');
+      img.src = reader.result;
+      img.style.display = '';
+      img.style.borderRadius = '8px';
+      document.getElementById('red-foto-leer').style.display = '';
+      document.getElementById('red-foto-quitar').style.display = '';
+      document.getElementById('red-foto-status').textContent = '';
+    };
+    reader.readAsDataURL(file);
+  }
+  document.getElementById('red-foto-file').onchange = (e)=>cargarRedFoto(e.target.files[0]);
+  habilitarPegado('red-foto-file', cargarRedFoto);
+  document.getElementById('red-foto-quitar').onclick = ()=>{
+    if(!confirm('¿Quitar la foto de esta cuenta?')) return;
+    redFotoArchivo = null; redFotoQuitada = true;
+    const img = document.getElementById('red-foto-preview');
+    img.src = ''; img.style.display = 'none';
+    document.getElementById('red-foto-quitar').style.display = 'none';
+    document.getElementById('red-foto-leer').style.display = 'none';
+  };
+  document.getElementById('red-foto-leer').onclick = async ()=>{
+    const btn = document.getElementById('red-foto-leer');
+    const status = document.getElementById('red-foto-status');
+    const previewImg = document.getElementById('red-foto-preview');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo el perfil...`;
+    try{
+      const base64 = previewImg.src.split(',')[1];
+      const prompt = `Esta es una captura de un perfil de red social. Respondé ÚNICAMENTE con un JSON: {"foto": {"x": <% izquierda o null>, "y": <% arriba o null>, "size": <% del ancho o null>}, "seguidores": <número o null>, "publicaciones": <número o null>}`;
+      const texto = await llamarGemini(prompt, base64, redFotoArchivo.type||'image/png');
+      const datos = JSON.parse(texto.replace(/```json|```/g,'').trim());
+      let completados = [];
+      if(datos.seguidores!=null){ document.getElementById('red-seguidores').value = datos.seguidores; completados.push('seguidores'); }
+      if(datos.publicaciones!=null){ document.getElementById('red-publicaciones').value = datos.publicaciones; completados.push('publicaciones'); }
+      if(datos.foto && datos.foto.x!=null){
+        await new Promise((resolve)=>{
+          const imgObj = new Image();
+          imgObj.onload = ()=>{
+            const canvas = document.createElement('canvas');
+            canvas.width = 300; canvas.height = 300;
+            const ctx = canvas.getContext('2d');
+            const sx=(datos.foto.x/100)*imgObj.naturalWidth, sy=(datos.foto.y/100)*imgObj.naturalHeight, sSize=(datos.foto.size/100)*imgObj.naturalWidth;
+            ctx.drawImage(imgObj, sx, sy, sSize, sSize, 0, 0, 300, 300);
+            canvas.toBlob((blob)=>{ redFotoArchivo = blob; previewImg.src = URL.createObjectURL(blob); previewImg.style.borderRadius = '50%'; completados.push('foto'); resolve(); }, 'image/jpeg', 0.92);
+          };
+          imgObj.src = previewImg.src;
+        });
+      }
+      status.innerHTML = completados.length ? `<span class="gain">Completado: ${completados.join(', ')}</span>` : '<span class="muted">No pude leer nada.</span>';
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+
+  // --- Estadísticas propias de la cuenta ---
+  let redStatsArchivo = null, redStatsPendiente = null;
+  function cargarRedStats(file){
+    if(!file) return;
+    redStatsArchivo = file;
+    document.getElementById('red-stats-leer').style.display = '';
+    document.getElementById('red-stats-status').textContent = '';
+  }
+  document.getElementById('red-stats-file').onchange = (e)=>cargarRedStats(e.target.files[0]);
+  habilitarPegado('red-stats-file', cargarRedStats);
+  document.getElementById('red-stats-leer').onclick = async ()=>{
+    if(!redStatsArchivo) return;
+    const btn = document.getElementById('red-stats-leer');
+    const status = document.getElementById('red-stats-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo...`;
+    try{
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve)=>{ reader.onload=()=>resolve(reader.result.split(',')[1]); reader.readAsDataURL(redStatsArchivo); });
+      const prompt = "Esta es una captura de las estadísticas de audiencia (género, edad, país). Respondé SOLO con JSON: {\"pct_masculino\": <entero 0-100 o null>, \"pct_femenino\": <entero 0-100 o null>, \"pais_principal\": \"<país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
+      const texto = await llamarGemini(prompt, base64, redStatsArchivo.type||'image/png');
+      const parsed = JSON.parse(texto.replace(/```json|```/g,'').trim());
+      redStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:parsed.pais_principal||'', rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
+      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}, país: ${parsed.pais_principal||'—'}</span>`;
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('modal-save').onclick = async ()=>{
     r.plataforma = document.getElementById('red-plataforma').value;
     r.usuario = document.getElementById('red-usuario').value.trim();
@@ -2982,14 +3123,42 @@ function openRedModal(infId, existingRed){
     const seguidoresNuevo = document.getElementById('red-seguidores').value;
     if(seguidoresNuevo !== String(r.seguidores||'')) r.fecha_actualizacion = todayStr();
     r.seguidores = seguidoresNuevo;
+    r.vista_reel_min = document.getElementById('red-vista').value;
+    r.cantidad_publicaciones = document.getElementById('red-publicaciones').value;
     r.codigo_promocional = document.getElementById('red-promo').value.trim();
     r.notas = document.getElementById('red-notas').value.trim();
     r.activa = document.getElementById('red-activa').checked;
     if(!r.fecha_actualizacion) r.fecha_actualizacion = todayStr();
     if(!r.usuario && !r.link){ alert('Cargá al menos el usuario o el link'); return; }
+    if(redFotoQuitada && !redFotoArchivo){ r.foto_url = ''; }
+    if(redFotoArchivo){
+      const supa = getSupabaseClient();
+      if(supa){
+        try{
+          const comprimida = await comprimirImagen(redFotoArchivo);
+          const path = `avatares/${r.id}_${Date.now()}.jpg`;
+          const { error } = await supa.storage.from('capturas').upload(path, comprimida);
+          if(!error){ const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path); r.foto_url = urlData.publicUrl; }
+        }catch(err){ console.error('Error subiendo foto de cuenta', err); }
+      }
+    }
+    if(redStatsPendiente){
+      const supa = getSupabaseClient();
+      if(supa && redStatsArchivo){
+        try{
+          const path = `${r.id}/${Date.now()}_${redStatsArchivo.name||'stats.jpg'}`;
+          const { error } = await supa.storage.from('capturas').upload(path, redStatsArchivo);
+          if(!error){ const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path); redStatsPendiente.captura_url = urlData.publicUrl; }
+        }catch(err){ console.error('Error subiendo estadísticas de cuenta', err); }
+      }
+      r.historial_estadisticas = r.historial_estadisticas || [];
+      r.historial_estadisticas.push(redStatsPendiente);
+      if(redStatsPendiente.pct_masculino!=null) r.publico_masculino_pct = redStatsPendiente.pct_masculino;
+    }
     inf.redes = inf.redes || [];
     if(!existingRed) inf.redes.push(r);
     await saveData();
+    pegadoActivo = null;
     overlay.remove();
     render();
   };
@@ -3342,6 +3511,40 @@ function attachEvents(){
       });
     });
     attachTableEvents();
+
+    const cajaSugerencias = document.getElementById('f-search-sugerencias');
+    const campoBuscar = document.getElementById('f-search');
+    const mostrarSugerencias = ()=>{
+      const q = campoBuscar.value.trim().toLowerCase();
+      if(!q){ cajaSugerencias.style.display = 'none'; return; }
+      const resultados = [];
+      state.influencers.forEach(inf=>{
+        if((inf.usuario_ig||'').toLowerCase().includes(q)){
+          resultados.push({infId: inf.id, foto: inf.foto_url, texto: `${inf.usuario_ig} (principal)`});
+        }
+        (inf.redes||[]).forEach(r=>{
+          if((r.usuario||'').toLowerCase().includes(q)){
+            resultados.push({infId: inf.id, foto: r.foto_url||inf.foto_url, texto: `${r.usuario} (${r.plataforma} de ${inf.usuario_ig})`});
+          }
+        });
+      });
+      if(!resultados.length){ cajaSugerencias.style.display = 'none'; return; }
+      cajaSugerencias.innerHTML = resultados.slice(0,6).map(res=>`
+        <div class="row-click" data-sugerencia="${res.infId}" style="display:flex; align-items:center; gap:8px; padding:8px 12px; cursor:pointer;">
+          ${res.foto ? `<img src="${res.foto}" style="width:24px; height:24px; border-radius:50%; object-fit:cover;">` : `<span style="display:inline-block; width:24px; height:24px; border-radius:50%; background:var(--surface3);"></span>`}
+          <span style="font-size:13px;">${res.texto}</span>
+        </div>
+      `).join('');
+      cajaSugerencias.style.display = '';
+      cajaSugerencias.querySelectorAll('[data-sugerencia]').forEach(el=>{
+        el.onclick = ()=>{ state.detailId = el.dataset.sugerencia; state.view='detail'; render(); };
+      });
+    };
+    campoBuscar.addEventListener('input', mostrarSugerencias);
+    campoBuscar.addEventListener('focus', mostrarSugerencias);
+    document.addEventListener('click', (e)=>{
+      if(e.target!==campoBuscar && !cajaSugerencias.contains(e.target)) cajaSugerencias.style.display = 'none';
+    });
   }
 
   if(state.view==='detail'){
