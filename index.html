@@ -224,7 +224,65 @@ document.addEventListener('click', (e)=>{
     tip.style.top = (rect.bottom + 6) + 'px';
     e.stopPropagation();
   }
+  if(e.target.dataset.verGrande){
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+    overlay.style.cursor = 'zoom-out';
+    overlay.innerHTML = `<img src="${e.target.dataset.verGrande}" style="max-width:90vw; max-height:90vh; border-radius:12px; object-fit:contain;">`;
+    overlay.onclick = ()=>overlay.remove();
+    document.body.appendChild(overlay);
+  }
 });
+
+// --- Sistema genérico de "pegar imagen con Ctrl+V" para cualquier campo de subir archivo ---
+let pegadoActivo = null;
+
+function habilitarPegado(fileInputId, onArchivo){
+  const input = document.getElementById(fileInputId);
+  if(!input) return;
+  const marcarActivo = ()=>{ pegadoActivo = onArchivo; };
+  input.addEventListener('click', marcarActivo);
+  input.addEventListener('focus', marcarActivo);
+  // el primer campo de pegado que aparece en un modal queda activo por defecto
+  if(!pegadoActivo) pegadoActivo = onArchivo;
+}
+
+document.addEventListener('paste', (e)=>{
+  if(!pegadoActivo) return;
+  const items = e.clipboardData?.items;
+  if(!items) return;
+  for(const item of items){
+    if(item.type.startsWith('image/')){
+      pegadoActivo(item.getAsFile());
+      e.preventDefault();
+      break;
+    }
+  }
+});
+
+function comprimirImagen(file, maxDim=600, calidad=0.8){
+  return new Promise((resolve)=>{
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = new Image();
+      img.onload = ()=>{
+        let w = img.naturalWidth, h = img.naturalHeight;
+        if(w > maxDim || h > maxDim){
+          if(w >= h){ h = Math.round(h*(maxDim/w)); w = maxDim; }
+          else{ w = Math.round(w*(maxDim/h)); h = maxDim; }
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+        canvas.toBlob((blob)=>resolve(blob||file), 'image/jpeg', calidad);
+      };
+      img.onerror = ()=>resolve(file);
+      img.src = reader.result;
+    };
+    reader.onerror = ()=>resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
 
 const CATEGORIAS = ["Fútbol","Memes","Entretenimiento","Streamers","Otro"];
 const PAISES = ["Argentina","Perú","México","Colombia","Chile","Ecuador","Otro"];
@@ -271,6 +329,13 @@ function migrate(inf){
   inf.codigo_promocional = inf.codigo_promocional || '';
   inf.logo_link = inf.logo_link || '';
   inf.redes = inf.redes || [];
+  inf.pais = inf.pais || '';
+  inf.fuente_captacion = inf.fuente_captacion || '';
+  inf.foto_url = inf.foto_url || '';
+  inf.riesgo = inf.riesgo || '';
+  inf.favorito = inf.favorito || false;
+  inf.cantidad_publicaciones = inf.cantidad_publicaciones || '';
+  inf.fecha_creacion = inf.fecha_creacion || '';
   if(!inf.historial_contacto){
     inf.historial_contacto = [];
     if(inf.ultimo_contacto_fecha){
@@ -281,6 +346,9 @@ function migrate(inf){
     neg.num_reels = neg.num_reels || 5;
     neg.modalidad_pago = neg.modalidad_pago || '50/50';
     neg.tramos = neg.tramos || [];
+    neg.estado_historial = neg.estado_historial || [];
+    neg.cuenta_id = neg.cuenta_id || 'principal';
+    neg.link_contrato = neg.link_contrato || '';
     if(!inf.codigo_promocional && neg.codigo_promocional) inf.codigo_promocional = neg.codigo_promocional;
     if(!inf.logo_link && neg.logo_link) inf.logo_link = neg.logo_link;
     if(!neg.reels){
@@ -289,6 +357,11 @@ function migrate(inf){
         neg.reels.push({id:uid(), numero:1, fecha_publicacion:inf.evidencia.fecha_publicacion||'', link_reel:inf.evidencia.link_reel||'', link_video_descargado:inf.evidencia.link_video_descargado||'', pagado:false, monto_pagado:''});
       }
     }
+    neg.reels = neg.reels.map(r=>{
+      r.plataforma = r.plataforma || 'Instagram';
+      r.comprimido = r.comprimido || false;
+      return r;
+    });
     return neg;
   });
   return inf;
@@ -1038,7 +1111,7 @@ function renderTable(){
           const marcado = state.poolSeleccionados && state.poolSeleccionados.has(inf.id);
           return `<tr class="row-click" data-open="${inf.id}">
             <td style="width:30px" onclick="event.stopPropagation()"><input type="checkbox" data-seleccionar="${inf.id}" ${marcado?'checked':''} style="width:auto"></td>
-            <td style="width:36px">${inf.foto_url ? `<img src="${inf.foto_url}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle;">` : `<span style="display:inline-block; width:28px; height:28px; border-radius:50%; background:var(--surface2); text-align:center; line-height:28px; font-size:11px; color:var(--text3);">${(inf.usuario_ig||'?').replace('@','').charAt(0).toUpperCase()}</span>`}</td>
+            <td style="width:36px" onclick="event.stopPropagation()">${inf.foto_url ? `<img src="${inf.foto_url}" data-ver-grande="${inf.foto_url}" style="width:28px; height:28px; border-radius:50%; object-fit:cover; vertical-align:middle; cursor:pointer;">` : `<span style="display:inline-block; width:28px; height:28px; border-radius:50%; background:var(--surface2); text-align:center; line-height:28px; font-size:11px; color:var(--text3);">${(inf.usuario_ig||'?').replace('@','').charAt(0).toUpperCase()}</span>`}</td>
             <td>${inf.usuario_ig}</td>
             <td>${inf.categoria||'—'}</td>
             <td class="${preClass}">${pre.estado}</td>
@@ -1072,7 +1145,10 @@ function renderPortfolio(){
     <div class="portfolio-grid">
       ${casos.map((c,i)=>`
         <div class="portfolio-card">
-          <h4>${c.inf.usuario_ig}</h4>
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">
+            ${c.inf.foto_url?`<img src="${c.inf.foto_url}" data-ver-grande="${c.inf.foto_url}" style="width:32px; height:32px; border-radius:50%; object-fit:cover; cursor:pointer;">`:''}
+            <h4 style="margin:0">${c.inf.usuario_ig}</h4>
+          </div>
           <div class="muted">${c.inf.categoria||'Sin categoría'} · ${c.neg.marca}</div>
           <div class="gain" style="margin-top:8px">Ganancia: ${money(c.ganancia)}</div>
           <div class="muted" style="margin-top:6px">${c.reelsConVideo.length} de ${c.neg.num_reels||5} reels guardados</div>
@@ -1362,11 +1438,19 @@ function renderDetail(){
 
   return `
     <span class="back-link" id="back-to-pool">← Volver al pool</span>
+    ${!inf.foto_url ? `
+      <div class="alerts-box" style="margin-bottom:14px; border-color:var(--gold-dim);">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span>📸 Todavía no le pusiste foto a este influencer.</span>
+          <button class="ghost" id="btn-agregar-foto-ahora">Subir foto ahora</button>
+        </div>
+      </div>
+    ` : ''}
     <div class="detail-header">
-      ${inf.foto_url ? `<img src="${inf.foto_url}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; border:1px solid var(--border);">` : ''}
+      ${inf.foto_url ? `<img src="${inf.foto_url}" data-ver-grande="${inf.foto_url}" style="width:56px; height:56px; border-radius:50%; object-fit:cover; border:1px solid var(--border); cursor:pointer;">` : ''}
       <div>
         <h2>${inf.favorito?'⭐ ':''}${inf.usuario_ig} ${inf.riesgo?`<span class="chip ${inf.riesgo==='Alto'?'pct-bad':inf.riesgo==='Bajo'?'gain':''}" style="font-size:11px;">Riesgo: ${inf.riesgo}</span>`:''}</h2>
-        <div class="muted">${inf.categoria||'Sin categoría'} · Público masculino: <span class="${inf.publico_masculino_pct<60?'pct-bad':'pct-ok'}">${inf.publico_masculino_pct||'—'}%</span> · Seguidores: ${inf.seguidores?Number(inf.seguidores).toLocaleString('es-AR'):'—'} · Vista mín.: ${inf.vista_reel_min?Number(inf.vista_reel_min).toLocaleString('es-AR'):'—'}</div>
+        <div class="muted">${inf.categoria||'Sin categoría'} · Público masculino: <span class="${inf.publico_masculino_pct<60?'pct-bad':'pct-ok'}">${inf.publico_masculino_pct||'—'}%</span> · Seguidores: ${inf.seguidores?Number(inf.seguidores).toLocaleString('es-AR'):'—'} · Vista mín.: ${inf.vista_reel_min?Number(inf.vista_reel_min).toLocaleString('es-AR'):'—'} · Publicaciones: ${inf.cantidad_publicaciones||'—'}</div>
         ${(inf.redes&&inf.redes.length) ? `<div class="muted" style="margin-top:4px">Audiencia combinada (todas las cuentas): <span class="mono gain">${((Number(inf.seguidores)||0)+inf.redes.reduce((s,r)=>s+(Number(r.seguidores)||0),0)).toLocaleString('es-AR')}</span></div>` : ''}
         <div class="muted" style="margin-top:4px">Precalificación: <span class="${preClass}">${pre.estado}</span>${pre.motivo?` — ${pre.motivo}`:''}</div>
         <div class="muted" style="margin-top:4px">Código promo: <span class="mono">${inf.codigo_promocional||'—'}</span> · Logo: ${inf.logo_link?`<a href="${inf.logo_link}" target="_blank" style="color:var(--gold)">Ver logo</a>`:'—'}</div>
@@ -1465,7 +1549,7 @@ function renderDetail(){
         return `
         <div class="neg-item">
           <div class="neg-item-top">
-            <strong>${neg.marca}</strong>
+            <strong>${inf.foto_url?`<img src="${inf.foto_url}" data-ver-grande="${inf.foto_url}" style="width:22px; height:22px; border-radius:50%; object-fit:cover; cursor:pointer; vertical-align:middle; margin-right:6px;">`:''}${neg.marca}</strong>
             <span class="badge ${neg.estado.replace(' ','')}">${neg.estado}</span>
           </div>
           <div class="muted" style="font-size:12px; margin-bottom:8px;">Cuenta: ${cuentaUsada} ${neg.link_contrato?`· <a href="${neg.link_contrato}" target="_blank" style="color:var(--gold)">Ver contrato</a>`:''}</div>
@@ -1546,6 +1630,7 @@ function abrirComparadorModal(){
         <table>
           <thead><tr><th></th>${seleccionados.map(i=>`<th>${i.usuario_ig}</th>`).join('')}</tr></thead>
           <tbody>
+            <tr><td class="muted">Foto</td>${seleccionados.map(i=>`<td>${i.foto_url?`<img src="${i.foto_url}" data-ver-grande="${i.foto_url}" style="width:36px; height:36px; border-radius:50%; object-fit:cover; cursor:pointer;">`:'<span class="muted">—</span>'}</td>`).join('')}</tr>
             ${filas.map(f=>`<tr><td class="muted">${f.label}</td>${seleccionados.map(i=>`<td class="mono">${f.get(i)}</td>`).join('')}</tr>`).join('')}
           </tbody>
         </table>
@@ -1617,18 +1702,44 @@ function openCargaRapidaModal(){
   const overlay = document.createElement('div');
   overlay.className='overlay';
   overlay.innerHTML = `
-    <div class="modal" style="max-width:400px">
+    <div class="modal" style="max-width:420px">
       <h2>Carga rápida <span class="close" id="modal-close">×</span></h2>
-      <p class="muted" style="margin-bottom:14px">Lo mínimo para no perder el candidato. Completás el resto después con calma.</p>
+      <p class="muted" style="margin-bottom:14px">Lo mínimo para no perder el candidato — con captura del perfil y de estadísticas, se completa casi todo solo.</p>
+
+      <div style="display:flex; align-items:center; gap:14px; margin-bottom:14px;">
+        <img id="cr-foto-preview" style="width:56px; height:56px; border-radius:50%; object-fit:cover; background:var(--surface2); border:1px solid var(--border); display:none;">
+        <div>
+          <input type="file" id="cr-foto-file" accept="image/*" style="font-size:11px">
+          <div class="ia-note">Captura del perfil — o pegá con Ctrl+V</div>
+          <button class="ghost" id="cr-foto-leer" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer perfil con IA (foto + seguidores + categoría)</button>
+          <div id="cr-foto-status" class="ia-note"></div>
+        </div>
+      </div>
+
       <div class="field"><label>Usuario de Instagram</label><input id="cr-usuario" placeholder="@usuario" autofocus></div>
       <div class="field"><label>Seguidores (si lo viste)</label><input id="cr-seguidores" type="number" placeholder="ej: 150000"></div>
       <div class="field"><label>Vista mínima de reel (si la viste)</label><input id="cr-vista" type="number" placeholder="ej: 45000"></div>
+      <div class="field"><label>Categoría</label>
+        <select id="cr-categoria">
+          <option value="">Seleccionar...</option>
+          ${CATEGORIAS.map(c=>`<option>${c}</option>`).join('')}
+        </select>
+      </div>
       <div class="field"><label>Cómo lo encontré</label>
         <select id="cr-fuente">
           <option value="">Seleccionar...</option>
           ${FUENTES.map(f=>`<option>${f}</option>`).join('')}
         </select>
       </div>
+
+      <div class="field">
+        <label>Captura de estadísticas de audiencia (género/país/edad)</label>
+        <input type="file" id="cr-stats-file" accept="image/*" style="font-size:11px">
+        <span class="ia-note">o pegá con Ctrl+V</span>
+        <button class="ghost" id="cr-stats-leer" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer estadísticas con IA</button>
+        <div id="cr-stats-status" class="ia-note"></div>
+      </div>
+
       <div class="modal-actions">
         <button class="ghost" id="modal-cancel">Cerrar</button>
         <button class="primary" id="cr-guardar">Guardar y cargar otro</button>
@@ -1642,28 +1753,167 @@ function openCargaRapidaModal(){
     document.getElementById('cr-contador').textContent = `Cargados hoy: ${hoy}`;
   };
   actualizarContador();
-  document.getElementById('modal-close').onclick = ()=>overlay.remove();
-  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+
+  const cerrarCarga = ()=>{ pegadoActivo=null; overlay.remove(); };
+  document.getElementById('modal-close').onclick = cerrarCarga;
+  document.getElementById('modal-cancel').onclick = cerrarCarga;
+
+  // --- Foto de perfil (foto + seguidores + categoría + publicaciones) ---
+  let crFotoArchivo = null, crPublicaciones = null;
+  pegadoActivo = null;
+  function cargarCrFoto(file){
+    if(!file) return;
+    crFotoArchivo = file;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      const img = document.getElementById('cr-foto-preview');
+      img.src = reader.result;
+      img.style.display = '';
+      img.style.borderRadius = '8px';
+      document.getElementById('cr-foto-leer').style.display = '';
+      document.getElementById('cr-foto-status').textContent = '';
+    };
+    reader.readAsDataURL(file);
+  }
+  document.getElementById('cr-foto-file').onchange = (e)=>cargarCrFoto(e.target.files[0]);
+  habilitarPegado('cr-foto-file', cargarCrFoto);
+
+  document.getElementById('cr-foto-leer').onclick = async ()=>{
+    const btn = document.getElementById('cr-foto-leer');
+    const status = document.getElementById('cr-foto-status');
+    const previewImg = document.getElementById('cr-foto-preview');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo el perfil...`;
+    let completados = [];
+    try{
+      const base64 = previewImg.src.split(',')[1];
+      const mediaType = crFotoArchivo.type || 'image/png';
+      const prompt = `Esta es una captura de un perfil de Instagram. Respondé ÚNICAMENTE con un JSON: {"foto": {"x": <% izquierda o null>, "y": <% arriba o null>, "size": <% del ancho o null>}, "seguidores": <número o null>, "publicaciones": <número o null>, "categoria": "<una de estas exacta: ${CATEGORIAS.join(', ')}, o null>", "apto": <true o false>, "motivo_no_apto": "<motivo si false, vacío si true>"}`;
+      const texto = await llamarGemini(prompt, base64, mediaType);
+      const datos = JSON.parse(texto.replace(/```json|```/g,'').trim());
+      if(datos.seguidores!=null){ document.getElementById('cr-seguidores').value = datos.seguidores; completados.push('seguidores'); }
+      if(datos.publicaciones!=null){ crPublicaciones = datos.publicaciones; completados.push('publicaciones'); }
+      if(datos.categoria){
+        const match = CATEGORIAS.find(c=>datos.categoria.toLowerCase().includes(c.toLowerCase()));
+        if(match){ document.getElementById('cr-categoria').value = match; completados.push('categoría'); }
+      }
+      if(datos.foto && datos.foto.x!=null){
+        await new Promise((resolve)=>{
+          const imgObj = new Image();
+          imgObj.onload = ()=>{
+            const canvas = document.createElement('canvas');
+            canvas.width = 300; canvas.height = 300;
+            const ctx = canvas.getContext('2d');
+            const sx = (datos.foto.x/100)*imgObj.naturalWidth, sy = (datos.foto.y/100)*imgObj.naturalHeight, sSize = (datos.foto.size/100)*imgObj.naturalWidth;
+            ctx.drawImage(imgObj, sx, sy, sSize, sSize, 0, 0, 300, 300);
+            canvas.toBlob((blob)=>{
+              crFotoArchivo = blob;
+              previewImg.src = URL.createObjectURL(blob);
+              previewImg.style.borderRadius = '50%';
+              completados.push('foto');
+              resolve();
+            }, 'image/jpeg', 0.92);
+          };
+          imgObj.src = previewImg.src;
+        });
+      }
+      let msg = completados.length ? `<span class="gain">Completado: ${completados.join(', ')}</span>` : '<span class="muted">No pude leer nada.</span>';
+      if(datos.apto===false) msg += `<br><span class="pct-bad">⚠ ${datos.motivo_no_apto||'revisar contenido'}</span>`;
+      status.innerHTML = msg;
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+
+  // --- Estadísticas de audiencia (género/país/edad) ---
+  let crStatsArchivo = null, crStatsPendiente = null;
+  function cargarCrStats(file){
+    if(!file) return;
+    crStatsArchivo = file;
+    document.getElementById('cr-stats-leer').style.display = '';
+    document.getElementById('cr-stats-status').textContent = '';
+  }
+  document.getElementById('cr-stats-file').onchange = (e)=>cargarCrStats(e.target.files[0]);
+  habilitarPegado('cr-stats-file', cargarCrStats);
+
+  document.getElementById('cr-stats-leer').onclick = async ()=>{
+    if(!crStatsArchivo) return;
+    const btn = document.getElementById('cr-stats-leer');
+    const status = document.getElementById('cr-stats-status');
+    btn.disabled = true;
+    status.innerHTML = `<span class="spinner"></span>Leyendo...`;
+    try{
+      const reader = new FileReader();
+      const base64 = await new Promise((resolve)=>{ reader.onload=()=>resolve(reader.result.split(',')[1]); reader.readAsDataURL(crStatsArchivo); });
+      const prompt = "Esta es una captura de las estadísticas de audiencia de Instagram (género, edad, país). Respondé SOLO con JSON: {\"pct_masculino\": <entero 0-100 o null>, \"pct_femenino\": <entero 0-100 o null>, \"pais_principal\": \"<país o null>\", \"rango_edad_principal\": \"<ej 25-34 o null>\"}";
+      const texto = await llamarGemini(prompt, base64, crStatsArchivo.type||'image/png');
+      const parsed = JSON.parse(texto.replace(/```json|```/g,'').trim());
+      crStatsPendiente = { id:uid(), fecha:todayStr(), pct_masculino:parsed.pct_masculino, pct_femenino:parsed.pct_femenino, pais_principal:parsed.pais_principal||'', rango_edad_principal:parsed.rango_edad_principal||'', captura_url:null };
+      status.innerHTML = `<span class="gain">Listo — % masculino: ${parsed.pct_masculino??'—'}, país: ${parsed.pais_principal||'—'}</span>`;
+    }catch(err){
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">Error: ${err.message}</span>`;
+    }
+    btn.disabled = false;
+  };
+
   document.getElementById('cr-guardar').onclick = async ()=>{
     const usuario = document.getElementById('cr-usuario').value.trim();
     if(!usuario){ alert('Falta el usuario de Instagram'); return; }
     const usuarioNorm = usuario.toLowerCase().replace('@','');
     const duplicado = state.influencers.find(i=>(i.usuario_ig||'').toLowerCase().replace('@','')===usuarioNorm);
     if(duplicado && !confirm(`Ya tenés cargado a "${duplicado.usuario_ig}". ¿Guardar igual?`)) return;
+    const btnGuardar = document.getElementById('cr-guardar');
+    btnGuardar.disabled = true;
     const inf = {
-      id:uid(), usuario_ig:usuario, link_ig:'', contacto:'', categoria:'', pais:'',
-      fuente_captacion: document.getElementById('cr-fuente').value,
+      id:uid(), usuario_ig:usuario, link_ig:'', contacto:'', categoria: document.getElementById('cr-categoria').value, pais:'',
+      fuente_captacion: document.getElementById('cr-fuente').value, foto_url:'', cantidad_publicaciones: crPublicaciones||'',
       publico_masculino_pct:'', seguidores: document.getElementById('cr-seguidores').value, vista_reel_min: document.getElementById('cr-vista').value,
       prioridad:'Media', cooldown_hasta:'', etiquetas:[], codigo_promocional:'', logo_link:'',
       historial_contacto:[], historial_estadisticas:[], negociaciones:[], fecha_creacion: todayStr()
     };
+    const supa = getSupabaseClient();
+    if(supa && crFotoArchivo){
+      try{
+        const comprimida = await comprimirImagen(crFotoArchivo);
+        const path = `avatares/${inf.id}_${Date.now()}.jpg`;
+        const { error } = await supa.storage.from('capturas').upload(path, comprimida);
+        if(!error){ const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path); inf.foto_url = urlData.publicUrl; }
+      }catch(err){ console.error('Error subiendo foto', err); }
+    }
+    if(supa && crStatsPendiente && crStatsArchivo){
+      try{
+        const path = `${inf.id}/${Date.now()}_${crStatsArchivo.name||'stats.jpg'}`;
+        const { error } = await supa.storage.from('capturas').upload(path, crStatsArchivo);
+        if(!error){ const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path); crStatsPendiente.captura_url = urlData.publicUrl; }
+      }catch(err){ console.error('Error subiendo estadísticas', err); }
+    }
+    if(crStatsPendiente){
+      inf.historial_estadisticas.push(crStatsPendiente);
+      if(crStatsPendiente.pct_masculino!=null) inf.publico_masculino_pct = crStatsPendiente.pct_masculino;
+      if(crStatsPendiente.pais_principal){
+        const matchPais = PAISES.find(p=>crStatsPendiente.pais_principal.toLowerCase().includes(p.toLowerCase()));
+        if(matchPais) inf.pais = matchPais;
+      }
+    }
     state.influencers.push(inf);
     await saveData();
+    // reset del formulario para cargar el siguiente
     document.getElementById('cr-usuario').value = '';
     document.getElementById('cr-seguidores').value = '';
     document.getElementById('cr-vista').value = '';
+    document.getElementById('cr-categoria').value = '';
+    document.getElementById('cr-foto-preview').style.display = 'none';
+    document.getElementById('cr-foto-leer').style.display = 'none';
+    document.getElementById('cr-foto-status').textContent = '';
+    document.getElementById('cr-foto-file').value = '';
+    document.getElementById('cr-stats-leer').style.display = 'none';
+    document.getElementById('cr-stats-status').textContent = '';
+    document.getElementById('cr-stats-file').value = '';
+    crFotoArchivo = null; crPublicaciones = null; crStatsArchivo = null; crStatsPendiente = null;
     document.getElementById('cr-usuario').focus();
     actualizarContador();
+    btnGuardar.disabled = false;
   };
 }
 
@@ -1678,8 +1928,9 @@ function openInfluencerModal(existing){
         <img id="m-foto-preview" src="${inf.foto_url||''}" style="width:64px; height:64px; border-radius:50%; object-fit:cover; background:var(--surface2); border:1px solid var(--border); ${inf.foto_url?'':'display:none;'}">
         <div>
           <input type="file" id="m-foto-file" accept="image/*" style="font-size:11px">
+          <button class="ghost" id="m-foto-quitar" style="font-size:11px; padding:5px 10px; ${inf.foto_url?'':'display:none;'}">Quitar foto</button>
           <div class="ia-note">O pegá una captura con Ctrl+V estando en esta ventana.</div>
-          <button class="ghost" id="m-foto-recortar" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Recortar foto de perfil con IA</button>
+          <button class="ghost" id="m-foto-recortar" style="font-size:11px; padding:5px 10px; margin-top:6px; display:none;">Leer perfil con IA (foto + seguidores + categoría)</button>
           <div id="m-foto-status" class="ia-note"></div>
         </div>
       </div>
@@ -1715,6 +1966,7 @@ function openInfluencerModal(existing){
           </select>
           <div style="margin-top:8px;">
             <input type="file" id="m-cat-file" accept="image/*" style="font-size:11px">
+            <span class="ia-note">o pegá con Ctrl+V</span>
             <button class="ghost" id="m-cat-sugerir" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Sugerir categoría con IA</button>
             <div id="m-cat-status" class="ia-note"></div>
           </div>
@@ -1722,14 +1974,17 @@ function openInfluencerModal(existing){
         <div class="field"><label>Público masculino (%) ${ayuda('Porcentaje de su audiencia que es hombre. La marca exige mínimo 60%. Subí una captura de estadísticas abajo para completarlo solo.')}</label><input id="m-pct" type="number" min="0" max="100" value="${inf.publico_masculino_pct}">
           <div style="margin-top:8px;">
             <input type="file" id="m-stats-file" accept="image/*" style="font-size:11px">
+            <span class="ia-note">o pegá con Ctrl+V</span>
             <button class="ghost" id="m-stats-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer estadísticas con IA</button>
             <div id="m-stats-status" class="ia-note"></div>
           </div>
         </div>
         <div class="field"><label>Seguidores ${ayuda('Cantidad total de seguidores de la cuenta. Junto con la vista mínima, define si el perfil queda Precalificado (necesita 100.000 o más).')}</label><input id="m-seguidores" type="number" value="${inf.seguidores}" placeholder="ej: 150000"></div>
+        <div class="field"><label>Cantidad de publicaciones ${ayuda('Cuántos posts tiene en total la cuenta. Es un dato informativo, no afecta la precalificación.')}</label><input id="m-publicaciones" type="number" value="${inf.cantidad_publicaciones||''}" placeholder="ej: 320"></div>
         <div class="field"><label>Vista mínima de reel (el más bajo) ${ayuda('De sus últimos reels, el que tuvo MENOS vistas (no el promedio). Sirve para detectar cuentas con seguidores comprados. Necesita 50.000 o más para Precalificar.')}</label><input id="m-vistamin" type="number" value="${inf.vista_reel_min}" placeholder="ej: 45000">
           <div style="margin-top:8px;">
             <input type="file" id="m-datos-file" accept="image/*" style="font-size:11px">
+            <span class="ia-note">o pegá con Ctrl+V</span>
             <button class="ghost" id="m-datos-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer con IA</button>
             <div id="m-datos-status" class="ia-note"></div>
           </div>
@@ -1754,7 +2009,7 @@ function openInfluencerModal(existing){
   `;
   document.body.appendChild(overlay);
   const cerrarModalInfluencer = ()=>{
-    document.removeEventListener('paste', manejarPegado);
+    pegadoActivo = null;
     overlay.remove();
   };
   document.getElementById('modal-close').onclick = cerrarModalInfluencer;
@@ -1771,10 +2026,24 @@ function openInfluencerModal(existing){
   });
 
   let fotoArchivo = null;
+  let fotoQuitada = false;
+  document.getElementById('m-foto-quitar').onclick = ()=>{
+    if(!confirm('¿Quitar la foto actual?')) return;
+    fotoArchivo = null;
+    fotoQuitada = true;
+    const img = document.getElementById('m-foto-preview');
+    img.src = '';
+    img.style.display = 'none';
+    document.getElementById('m-foto-quitar').style.display = 'none';
+    document.getElementById('m-foto-recortar').style.display = 'none';
+    document.getElementById('m-foto-status').textContent = '';
+  };
+  pegadoActivo = null;
 
   function cargarFoto(file){
     if(!file) return;
     fotoArchivo = file;
+    fotoQuitada = false;
     const reader = new FileReader();
     reader.onload = ()=>{
       const img = document.getElementById('m-foto-preview');
@@ -1782,69 +2051,78 @@ function openInfluencerModal(existing){
       img.style.display = '';
       img.style.borderRadius = '8px'; // hasta que se recorte, se ve completa (no redonda)
       document.getElementById('m-foto-recortar').style.display = '';
+      document.getElementById('m-foto-quitar').style.display = '';
       document.getElementById('m-foto-status').textContent = '';
     };
     reader.readAsDataURL(file);
   }
 
   document.getElementById('m-foto-file').onchange = (e)=>cargarFoto(e.target.files[0]);
-
-  const manejarPegado = (e)=>{
-    if(!document.body.contains(overlay)) return; // el modal ya se cerró
-    const items = e.clipboardData?.items;
-    if(!items) return;
-    for(const item of items){
-      if(item.type.startsWith('image/')){
-        cargarFoto(item.getAsFile());
-        e.preventDefault();
-        break;
-      }
-    }
-  };
-  document.addEventListener('paste', manejarPegado);
+  habilitarPegado('m-foto-file', cargarFoto);
 
   document.getElementById('m-foto-recortar').onclick = async ()=>{
     const btn = document.getElementById('m-foto-recortar');
     const status = document.getElementById('m-foto-status');
     const previewImg = document.getElementById('m-foto-preview');
     btn.disabled = true;
-    status.innerHTML = `<span class="spinner"></span>Buscando la foto de perfil en la imagen...`;
+    status.innerHTML = `<span class="spinner"></span>Leyendo el perfil (foto, seguidores, categoría, publicaciones)...`;
+    let completados = [];
     try{
       const base64 = previewImg.src.split(',')[1];
       const mediaType = fotoArchivo.type || 'image/png';
-      const prompt = "Esta es una captura de un perfil de red social. Encontrá la foto de perfil circular (el avatar redondo, normalmente arriba a la izquierda). Respondé ÚNICAMENTE con un JSON con la posición del cuadrado que la contiene, en porcentaje del ancho/alto total de la imagen: {\"x\": <% desde el borde izquierdo hasta el borde izquierdo del avatar>, \"y\": <% desde arriba hasta el borde superior del avatar>, \"size\": <% del ancho total que ocupa el diámetro del avatar>}";
+      const prompt = `Esta es una captura de un perfil de Instagram (o red social similar). Respondé ÚNICAMENTE con un JSON, sin texto adicional, con este formato exacto:
+{"foto": {"x": <% desde el borde izquierdo hasta el borde izquierdo de la foto de perfil circular, o null si no se ve>, "y": <% desde arriba hasta el borde superior de esa foto, o null>, "size": <% del ancho total que ocupa el diámetro de esa foto, o null>},
+"seguidores": <número entero de seguidores, sin comas ni puntos, o null si no se ve>,
+"publicaciones": <número entero de publicaciones/posts, o null si no se ve>,
+"categoria": "<una de estas exacta: ${CATEGORIAS.join(', ')}, o null>",
+"apto": <true o false, sobre si el contenido parece apto para una campaña publicitaria de una casa de apuestas — sin política, sin religión, sin contenido sexual o violento>,
+"motivo_no_apto": "<si apto es false, por qué; si es true, vacío>"}`;
       const texto = await llamarGemini(prompt, base64, mediaType);
       const clean = texto.replace(/```json|```/g,'').trim();
-      const box = JSON.parse(clean);
+      const datos = JSON.parse(clean);
 
-      const imgObj = new Image();
-      imgObj.onload = ()=>{
-        const canvas = document.createElement('canvas');
-        const outSize = 300;
-        canvas.width = outSize; canvas.height = outSize;
-        const ctx = canvas.getContext('2d');
-        const sx = (box.x/100) * imgObj.naturalWidth;
-        const sy = (box.y/100) * imgObj.naturalHeight;
-        const sSize = (box.size/100) * imgObj.naturalWidth;
-        ctx.drawImage(imgObj, sx, sy, sSize, sSize, 0, 0, outSize, outSize);
-        canvas.toBlob((blob)=>{
-          fotoArchivo = blob;
-          previewImg.src = URL.createObjectURL(blob);
-          previewImg.style.borderRadius = '50%';
-          status.innerHTML = '<span class="gain">Listo — recortada.</span>';
-          btn.disabled = false;
-        }, 'image/jpeg', 0.92);
-      };
-      imgObj.src = previewImg.src;
+      if(datos.seguidores!=null){ document.getElementById('m-seguidores').value = datos.seguidores; completados.push('seguidores'); }
+      if(datos.publicaciones!=null){ document.getElementById('m-publicaciones')?.setAttribute('value', datos.publicaciones); if(document.getElementById('m-publicaciones')) document.getElementById('m-publicaciones').value = datos.publicaciones; completados.push('publicaciones'); }
+      if(datos.categoria){
+        const match = CATEGORIAS.find(c=>datos.categoria.toLowerCase().includes(c.toLowerCase()));
+        if(match){ document.getElementById('m-categoria').value = match; completados.push('categoría'); }
+      }
+
+      if(datos.foto && datos.foto.x!=null){
+        await new Promise((resolve)=>{
+          const imgObj = new Image();
+          imgObj.onload = ()=>{
+            const canvas = document.createElement('canvas');
+            const outSize = 300;
+            canvas.width = outSize; canvas.height = outSize;
+            const ctx = canvas.getContext('2d');
+            const sx = (datos.foto.x/100) * imgObj.naturalWidth;
+            const sy = (datos.foto.y/100) * imgObj.naturalHeight;
+            const sSize = (datos.foto.size/100) * imgObj.naturalWidth;
+            ctx.drawImage(imgObj, sx, sy, sSize, sSize, 0, 0, outSize, outSize);
+            canvas.toBlob((blob)=>{
+              fotoArchivo = blob;
+              previewImg.src = URL.createObjectURL(blob);
+              previewImg.style.borderRadius = '50%';
+              completados.push('foto');
+              resolve();
+            }, 'image/jpeg', 0.92);
+          };
+          imgObj.src = previewImg.src;
+        });
+      }
+
+      let mensaje = completados.length ? `<span class="gain">Completado: ${completados.join(', ')} (${completados.length} de 4 campos)</span>` : '<span class="muted">No pude leer ningún dato de esta captura.</span>';
+      if(datos.apto===false) mensaje += `<br><span class="pct-bad">⚠ Posible problema de contenido: ${datos.motivo_no_apto||'revisar manualmente'}</span>`;
+      status.innerHTML = mensaje;
     }catch(err){
-      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">No pude encontrarla sola (${err.message}). Recortala vos con cualquier editor y subila así.</span>`;
-      btn.disabled = false;
+      status.innerHTML = err.message==='SIN_CLAVE' ? 'Configurá la IA primero.' : `<span class="pct-bad">No pude leerla (${err.message}). Completá los campos a mano o probá con otra captura.</span>`;
     }
+    btn.disabled = false;
   };
 
   let catBase64 = null, catMediaType = null;
-  document.getElementById('m-cat-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  function cargarCat(file){
     if(!file) return;
     catMediaType = file.type;
     const reader = new FileReader();
@@ -1853,7 +2131,9 @@ function openInfluencerModal(existing){
       document.getElementById('m-cat-sugerir').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('m-cat-file').onchange = (e)=>cargarCat(e.target.files[0]);
+  habilitarPegado('m-cat-file', cargarCat);
   document.getElementById('m-cat-sugerir').onclick = async ()=>{
     if(!catBase64) return;
     const btn = document.getElementById('m-cat-sugerir');
@@ -1885,8 +2165,7 @@ function openInfluencerModal(existing){
   };
 
   let datosBase64 = null, datosMediaType = null;
-  document.getElementById('m-datos-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  function cargarDatos(file){
     if(!file) return;
     datosMediaType = file.type;
     const reader = new FileReader();
@@ -1895,7 +2174,9 @@ function openInfluencerModal(existing){
       document.getElementById('m-datos-leer').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('m-datos-file').onchange = (e)=>cargarDatos(e.target.files[0]);
+  habilitarPegado('m-datos-file', cargarDatos);
   document.getElementById('m-datos-leer').onclick = async ()=>{
     if(!datosBase64) return;
     const btn = document.getElementById('m-datos-leer');
@@ -1923,8 +2204,7 @@ function openInfluencerModal(existing){
 
   let statsBase64 = null, statsMediaType = null, statsArchivo = null;
   let statsPendiente = null;
-  document.getElementById('m-stats-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  function cargarStats(file){
     if(!file) return;
     statsArchivo = file;
     statsMediaType = file.type;
@@ -1934,7 +2214,9 @@ function openInfluencerModal(existing){
       document.getElementById('m-stats-leer').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('m-stats-file').onchange = (e)=>cargarStats(e.target.files[0]);
+  habilitarPegado('m-stats-file', cargarStats);
   document.getElementById('m-stats-leer').onclick = async ()=>{
     if(!statsBase64) return;
     const btn = document.getElementById('m-stats-leer');
@@ -1966,14 +2248,18 @@ function openInfluencerModal(existing){
   document.getElementById('modal-save').onclick = async ()=>{
     inf.usuario_ig = document.getElementById('m-usuario').value.trim();
     if(!inf.usuario_ig){ alert('Falta el usuario de Instagram'); return; }
+    if(fotoQuitada && !fotoArchivo){
+      inf.foto_url = '';
+    }
     if(fotoArchivo){
       const supa = getSupabaseClient();
       if(supa){
         const status = document.getElementById('m-foto-status');
-        status.innerHTML = `<span class="spinner"></span>Subiendo foto...`;
+        status.innerHTML = `<span class="spinner"></span>Comprimiendo y subiendo foto...`;
         try{
-          const path = `avatares/${inf.id}_${Date.now()}_${fotoArchivo.name}`;
-          const { error } = await supa.storage.from('capturas').upload(path, fotoArchivo);
+          const comprimida = await comprimirImagen(fotoArchivo);
+          const path = `avatares/${inf.id}_${Date.now()}.jpg`;
+          const { error } = await supa.storage.from('capturas').upload(path, comprimida);
           if(error) throw error;
           const { data: urlData } = supa.storage.from('capturas').getPublicUrl(path);
           inf.foto_url = urlData.publicUrl;
@@ -2018,6 +2304,7 @@ function openInfluencerModal(existing){
     inf.categoria = document.getElementById('m-categoria').value;
     inf.publico_masculino_pct = document.getElementById('m-pct').value;
     inf.seguidores = document.getElementById('m-seguidores').value;
+    inf.cantidad_publicaciones = document.getElementById('m-publicaciones').value;
     inf.vista_reel_min = document.getElementById('m-vistamin').value;
     inf.prioridad = document.getElementById('m-prioridad').value;
     inf.cooldown_hasta = document.getElementById('m-cooldown').value;
@@ -2027,7 +2314,7 @@ function openInfluencerModal(existing){
     inf.historial_contacto = inf.historial_contacto || [];
     if(!existing) state.influencers.push(inf);
     await saveData();
-    document.removeEventListener('paste', manejarPegado);
+    pegadoActivo = null;
     overlay.remove();
     render();
   };
@@ -2222,6 +2509,7 @@ function openReelModal(infId, negId, existingReel){
       <div class="field"><label>Monto pagado por este reel ($, opcional) ${ayuda('Si le pagás al influencer por tramos ligados a cada reel, anotás acá cuánto le tocó por este puntual.')}</label><input id="r-monto" type="number" value="${reel.monto_pagado}">
         <div style="margin-top:8px;">
           <input type="file" id="r-comp-file" accept="image/*" style="font-size:11px">
+          <span class="ia-note">o pegá con Ctrl+V</span>
           <button class="ghost" id="r-comp-leer" style="font-size:11px; padding:5px 10px; margin-top:4px" disabled>Leer comprobante con IA</button>
           <div id="r-comp-status" class="ia-note"></div>
         </div>
@@ -2230,6 +2518,7 @@ function openReelModal(infId, negId, existingReel){
       <div class="field">
         <label>Verificar logo y código promocional (captura del reel, opcional)</label>
         <input type="file" id="r-verif-file" accept="image/*">
+        <span class="ia-note">o pegá con Ctrl+V</span>
         <button class="ghost" id="r-verificar" style="margin-top:8px" disabled>Verificar con IA</button>
         <div id="r-verif-status" class="ia-note"></div>
       </div>
@@ -2241,8 +2530,8 @@ function openReelModal(infId, negId, existingReel){
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById('modal-close').onclick = ()=>overlay.remove();
-  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-close').onclick = ()=>{ pegadoActivo=null; overlay.remove(); };
+  document.getElementById('modal-cancel').onclick = ()=>{ pegadoActivo=null; overlay.remove(); };
   document.getElementById('modal-delete-reel')?.addEventListener('click', async ()=>{
     if(!confirm('¿Eliminar este reel?')) return;
     neg.reels = neg.reels.filter(r=>r.id!==reel.id);
@@ -2252,8 +2541,8 @@ function openReelModal(infId, negId, existingReel){
   });
 
   let verifBase64 = null, verifMediaType = null;
-  document.getElementById('r-verif-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  pegadoActivo = null;
+  function cargarVerif(file){
     if(!file) return;
     verifMediaType = file.type;
     const reader = new FileReader();
@@ -2262,7 +2551,9 @@ function openReelModal(infId, negId, existingReel){
       document.getElementById('r-verificar').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('r-verif-file').onchange = (e)=>cargarVerif(e.target.files[0]);
+  habilitarPegado('r-verif-file', cargarVerif);
   document.getElementById('r-verificar').onclick = async ()=>{
     if(!verifBase64) return;
     const btn = document.getElementById('r-verificar');
@@ -2285,8 +2576,7 @@ function openReelModal(infId, negId, existingReel){
   };
 
   let compBase64 = null, compMediaType = null;
-  document.getElementById('r-comp-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  function cargarComp(file){
     if(!file) return;
     compMediaType = file.type;
     const reader = new FileReader();
@@ -2295,7 +2585,9 @@ function openReelModal(infId, negId, existingReel){
       document.getElementById('r-comp-leer').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('r-comp-file').onchange = (e)=>cargarComp(e.target.files[0]);
+  habilitarPegado('r-comp-file', cargarComp);
   document.getElementById('r-comp-leer').onclick = async ()=>{
     if(!compBase64) return;
     const btn = document.getElementById('r-comp-leer');
@@ -2329,6 +2621,7 @@ function openReelModal(infId, negId, existingReel){
     reel.comprimido = document.getElementById('r-comprimido').checked;
     if(!existingReel) neg.reels.push(reel);
     await saveData();
+    pegadoActivo = null;
     overlay.remove();
     render();
   };
@@ -2622,7 +2915,7 @@ function openStatsModal(infId){
   overlay.innerHTML = `
     <div class="modal">
       <h2>Subir captura de estadísticas <span class="close" id="modal-close">×</span></h2>
-      <div class="field"><label>Captura de pantalla</label><input type="file" id="s-file" accept="image/*"></div>
+      <div class="field"><label>Captura de pantalla</label><input type="file" id="s-file" accept="image/*"><span class="ia-note">o pegá con Ctrl+V</span></div>
       <div id="s-preview-wrap"></div>
       <button class="ghost" id="s-analizar" style="margin-bottom:14px" disabled>Analizar con IA</button>
       <div id="s-status" class="ia-note"></div>
@@ -2641,12 +2934,12 @@ function openStatsModal(infId){
     </div>
   `;
   document.body.appendChild(overlay);
-  document.getElementById('modal-close').onclick = ()=>overlay.remove();
-  document.getElementById('modal-cancel').onclick = ()=>overlay.remove();
+  document.getElementById('modal-close').onclick = ()=>{ pegadoActivo=null; overlay.remove(); };
+  document.getElementById('modal-cancel').onclick = ()=>{ pegadoActivo=null; overlay.remove(); };
 
   let base64Data = null, mediaType = null, archivoOriginal = null;
-  document.getElementById('s-file').onchange = (e)=>{
-    const file = e.target.files[0];
+  pegadoActivo = null;
+  function cargarStatsExistente(file){
     if(!file) return;
     archivoOriginal = file;
     mediaType = file.type;
@@ -2657,7 +2950,9 @@ function openStatsModal(infId){
       document.getElementById('s-analizar').disabled = false;
     };
     reader.readAsDataURL(file);
-  };
+  }
+  document.getElementById('s-file').onchange = (e)=>cargarStatsExistente(e.target.files[0]);
+  habilitarPegado('s-file', cargarStatsExistente);
 
   document.getElementById('s-analizar').onclick = async ()=>{
     if(!base64Data) return;
@@ -2722,6 +3017,7 @@ function openStatsModal(infId){
       if(matchPais) inf.pais = matchPais;
     }
     await saveData();
+    pegadoActivo = null;
     overlay.remove();
     render();
   };
@@ -2729,12 +3025,13 @@ function openStatsModal(infId){
 
 function exportCSV(lista){
   const influencersAExportar = lista || state.influencers;
-  const rows = [["Usuario IG","Categoría","% Masculino","Prioridad","Plataformas extra","Marca","Estado","Presupuesto","Pago final","Ganancia","Estado pago"]];
+  const rows = [["Usuario IG","Categoría","País","Seguidores","Vista mínima","% Masculino","Precalificación","Riesgo","Prioridad","Plataformas extra","Marca","Estado","Presupuesto","Pago final","Ganancia","Estado pago"]];
   influencersAExportar.forEach(inf=>{
     const plataformasExtra = (inf.redes||[]).map(r=>r.plataforma).join(', ');
+    const pre = precalificacion(inf);
     (inf.negociaciones&&inf.negociaciones.length? inf.negociaciones : [{}]).forEach(neg=>{
       const ganancia = (Number(neg.presupuesto_marca)||0)-(Number(neg.pago_final)||0);
-      rows.push([inf.usuario_ig, inf.categoria||'', inf.publico_masculino_pct||'', inf.prioridad||'', plataformasExtra, neg.marca||'', neg.estado||'', neg.presupuesto_marca||'', neg.pago_final||'', neg.estado?ganancia:'', neg.estado_pago||'']);
+      rows.push([inf.usuario_ig, inf.categoria||'', inf.pais||'', inf.seguidores||'', inf.vista_reel_min||'', inf.publico_masculino_pct||'', pre.estado, inf.riesgo||'', inf.prioridad||'', plataformasExtra, neg.marca||'', neg.estado||'', neg.presupuesto_marca||'', neg.pago_final||'', neg.estado?ganancia:'', neg.estado_pago||'']);
     });
   });
   const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
@@ -2939,6 +3236,10 @@ function attachEvents(){
       const inf = state.influencers.find(i=>i.id===state.detailId);
       openInfluencerModal(inf);
     };
+    document.getElementById('btn-agregar-foto-ahora')?.addEventListener('click', ()=>{
+      const inf = state.influencers.find(i=>i.id===state.detailId);
+      openInfluencerModal(inf);
+    });
     document.getElementById('btn-delete-inf').onclick = async ()=>{
       if(confirm('¿Eliminar este influencer? Esta acción no se puede deshacer.')){
         state.influencers = state.influencers.filter(i=>i.id!==state.detailId);
